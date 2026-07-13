@@ -1,12 +1,13 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::Frame;
 use ratatui::buffer::Buffer;
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph, Widget};
-use ratatui_glamour::color::blend_2d;
+use ratatui_glamour::color::{blend_2d, lerp_u8};
 use ratatui_glamour::rule::dashed_title;
+use ratatui_glamour::surface::gradient_rounded_panel_lines;
 
 /// An entry in the command-mode popup menu.
 pub enum MenuItem {
@@ -145,17 +146,43 @@ impl Widget for &DashedTitle<'_> {
     }
 }
 
+struct GradientPanel {
+    stops: Vec<Color>,
+}
+
+impl Widget for &GradientPanel {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        let lines = gradient_rounded_panel_lines(
+            area.width as usize,
+            area.height as usize,
+            Style::default(),
+            &self.stops,
+        );
+        for (row, line) in lines.into_iter().enumerate() {
+            buf.set_line(area.x, area.y + row as u16, &line, area.width);
+        }
+    }
+}
+
 /// Render the full frame: terminal grid, status bar, and optional command menu.
 pub fn render(f: &mut Frame, screen: &vt100::Screen, labels: &[(char, String)], active_idx: usize, mode: &Mode) {
     let area = f.area();
 
-    let layout = Layout::default().direction(Direction::Vertical).constraints([Constraint::Min(1), Constraint::Length(1)]).split(area);
+    let border_stops = vec![
+        Color::Rgb(255, 95, 135),
+        Color::Rgb(135, 95, 255),
+        Color::Rgb(0, 255, 255),
+        Color::Rgb(135, 95, 255),
+        Color::Rgb(255, 95, 135),
+    ];
+    f.render_widget(&GradientPanel { stops: border_stops }, area);
 
-    let grid_area = layout[0];
-    let status_area = layout[1];
+    let inner = Rect::new(area.x + 1, area.y + 1, area.width.saturating_sub(2), area.height.saturating_sub(2));
+    let grid_rect = Rect::new(inner.x, inner.y, inner.width, inner.height.saturating_sub(1));
+    let status_rect = Rect::new(area.x + 1, area.bottom() - 1, area.width.saturating_sub(2), 1);
 
-    render_terminal_grid(f, grid_area, screen);
-    render_status_bar(f, status_area, labels, active_idx, mode);
+    render_terminal_grid(f, grid_rect, screen);
+    render_status_bar(f, status_rect, labels, active_idx, mode);
 
     if let Mode::Command(menu) = mode {
         render_menu(f, area, menu);
@@ -198,35 +225,70 @@ fn render_terminal_grid(f: &mut Frame, area: Rect, screen: &vt100::Screen) {
     }
 }
 
-fn render_status_bar(f: &mut Frame, area: Rect, labels: &[(char, String)], active_idx: usize, mode: &Mode) {
-    let (grad_start, grad_end, base_fg) = match mode {
-        Mode::Normal => (Color::Rgb(20, 40, 100), Color::Rgb(40, 70, 160), Color::White),
-        Mode::Command(_) => (Color::Rgb(140, 110, 20), Color::Rgb(180, 160, 50), Color::Black),
+fn render_status_bar(f: &mut Frame, area: Rect, labels: &[(char, String)], active_idx: usize, _mode: &Mode) {
+    let bright = (60u8, 80u8, 200u8);
+    let dark = (25u8, 35u8, 90u8);
+    let hint_bg = Color::Rgb(dark.0, dark.1, dark.2);
+    let hint_fg = Color::Rgb(180, 180, 200);
+    let bold = Modifier::BOLD;
+
+    let count = labels.len();
+    let bg_for = |i: usize| -> Color {
+        if count <= 1 {
+            return Color::Rgb(bright.0, bright.1, bright.2);
+        }
+        let t = i as f32 / (count) as f32;
+        let r = lerp_u8(bright.0, dark.0, t);
+        let g = lerp_u8(bright.1, dark.1, t);
+        let b = lerp_u8(bright.2, dark.2, t);
+        Color::Rgb(r, g, b)
     };
 
-    let grad_colors = blend_2d(area.width as usize, 1, 0.0, &[grad_start, grad_end]);
-    f.render_widget(&GradientRect { colors: grad_colors, width: area.width }, area);
+    let fg_for = |i: usize| -> Color {
+        if i == active_idx { Color::White } else { Color::Rgb(200, 200, 220) }
+    };
 
-    let mut spans: Vec<Span> = Vec::new();
+    let mod_for = |i: usize| -> Modifier {
+        if i == active_idx { bold } else { Modifier::empty() }
+    };
+
+    let first_bg = bg_for(0);
+
+    let mut spans = vec![
+        Span::styled("──", Style::default()),
+        Span::styled("\u{E0B2}", Style::default().fg(first_bg)),
+    ];
+
     for (i, (shortcut, name)) in labels.iter().enumerate() {
-        if i > 0 {
-            spans.push(Span::styled(" | ", Style::default().fg(base_fg)));
+        let bg = bg_for(i);
+        spans.push(Span::styled(format!(" {}:{} ", shortcut, name), Style::default().fg(fg_for(i)).bg(bg).add_modifier(mod_for(i))));
+        if i + 1 < labels.len() {
+            let next_bg = bg_for(i + 1);
+            spans.push(Span::styled("\u{E0B2}", Style::default().fg(next_bg).bg(bg)));
         }
-        let text = if i == active_idx { format!("*{}:{}*", shortcut, name) } else { format!("{}:{}", shortcut, name) };
-        let style = Style::default().fg(base_fg).add_modifier(if i == active_idx { Modifier::BOLD } else { Modifier::empty() });
-        spans.push(Span::styled(text, style));
     }
 
-    spans.push(Span::raw("  "));
+    let last_bg = bg_for(labels.len() - 1);
+    spans.push(Span::styled("\u{E0B2}", Style::default().fg(hint_bg).bg(last_bg)));
+    spans.push(Span::styled(" Ctrl+\\ Menu ", Style::default().fg(hint_fg).bg(hint_bg)));
 
-    let hint = match mode {
-        Mode::Normal => "Ctrl+\\ Menu",
-        Mode::Command(_) => "Esc=Close  q=Quit",
-    };
-    spans.push(Span::styled(hint, Style::default().fg(Color::DarkGray)));
+    let mut fixed: usize = 1 + 2;
+    for (i, (shortcut, name)) in labels.iter().enumerate() {
+        fixed += format!(" {}:{} ", shortcut, name).len();
+        if i + 1 < labels.len() {
+            fixed += 1;
+        }
+    }
+    fixed += 1;
+    fixed += " Ctrl+\\ Menu ".len();
+    fixed += 1 + 2;
+    let pad = (area.width as usize).saturating_sub(fixed);
 
-    let line = Line::from(spans);
-    f.render_widget(Paragraph::new(line), area);
+    spans.push(Span::styled(" ".repeat(pad), Style::default().bg(hint_bg)));
+    spans.push(Span::styled("\u{E0B0}", Style::default().fg(hint_bg)));
+    spans.push(Span::styled("──", Style::default()));
+
+    f.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
 fn render_menu(f: &mut Frame, area: Rect, menu: &MenuState) {
