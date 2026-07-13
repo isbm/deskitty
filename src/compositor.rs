@@ -152,12 +152,7 @@ struct GradientPanel {
 
 impl Widget for &GradientPanel {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let lines = gradient_rounded_panel_lines(
-            area.width as usize,
-            area.height as usize,
-            Style::default(),
-            &self.stops,
-        );
+        let lines = gradient_rounded_panel_lines(area.width as usize, area.height as usize, Style::default(), &self.stops);
         for (row, line) in lines.into_iter().enumerate() {
             buf.set_line(area.x, area.y + row as u16, &line, area.width);
         }
@@ -168,13 +163,8 @@ impl Widget for &GradientPanel {
 pub fn render(f: &mut Frame, screen: &vt100::Screen, labels: &[(char, String)], active_idx: usize, mode: &Mode) {
     let area = f.area();
 
-    let border_stops = vec![
-        Color::Rgb(255, 95, 135),
-        Color::Rgb(135, 95, 255),
-        Color::Rgb(0, 255, 255),
-        Color::Rgb(135, 95, 255),
-        Color::Rgb(255, 95, 135),
-    ];
+    let border_stops =
+        vec![Color::Rgb(255, 95, 135), Color::Rgb(135, 95, 255), Color::Rgb(0, 255, 255), Color::Rgb(135, 95, 255), Color::Rgb(255, 95, 135)];
     f.render_widget(&GradientPanel { stops: border_stops }, area);
 
     let inner = Rect::new(area.x + 1, area.y + 1, area.width.saturating_sub(2), area.height.saturating_sub(2));
@@ -244,20 +234,13 @@ fn render_status_bar(f: &mut Frame, area: Rect, labels: &[(char, String)], activ
         Color::Rgb(r, g, b)
     };
 
-    let fg_for = |i: usize| -> Color {
-        if i == active_idx { Color::White } else { Color::Rgb(200, 200, 220) }
-    };
+    let fg_for = |i: usize| -> Color { if i == active_idx { Color::White } else { Color::Rgb(200, 200, 220) } };
 
-    let mod_for = |i: usize| -> Modifier {
-        if i == active_idx { bold } else { Modifier::empty() }
-    };
+    let mod_for = |i: usize| -> Modifier { if i == active_idx { bold } else { Modifier::empty() } };
 
     let first_bg = bg_for(0);
 
-    let mut spans = vec![
-        Span::styled("──", Style::default()),
-        Span::styled("\u{E0B2}", Style::default().fg(first_bg)),
-    ];
+    let mut spans = vec![Span::styled("──", Style::default()), Span::styled("\u{E0B2}", Style::default().fg(first_bg))];
 
     for (i, (shortcut, name)) in labels.iter().enumerate() {
         let bg = bg_for(i);
@@ -312,12 +295,7 @@ fn render_menu(f: &mut Frame, area: Rect, menu: &MenuState) {
 
     let title_rect = Rect::new(inner_area.x, inner_area.y, inner_area.width, 1);
     f.render_widget(
-        &DashedTitle {
-            text: "Tab Menu",
-            text_fg: Color::White,
-            grad_start: Color::Rgb(100, 100, 180),
-            grad_end: Color::Rgb(40, 40, 80),
-        },
+        &DashedTitle { text: "Applications", text_fg: Color::White, grad_start: Color::Rgb(100, 100, 180), grad_end: Color::Rgb(40, 40, 80) },
         title_rect,
     );
 
@@ -334,8 +312,7 @@ fn render_menu(f: &mut Frame, area: Rect, menu: &MenuState) {
         let raw = format!(" {label}");
         let text = format!("{:<width$}{}", raw, shortcut_text, width = inner_width - shortcut_text.len());
 
-        let style =
-            if i == menu.selected { Style::default().fg(Color::Black).bg(Color::White) } else { Style::default().fg(Color::White) };
+        let style = if i == menu.selected { Style::default().fg(Color::Black).bg(Color::White) } else { Style::default().fg(Color::White) };
         lines.push(Line::from(Span::styled(text, style)));
     }
 

@@ -41,8 +41,8 @@ fn run() -> Result<(), String> {
     let mut term = ratatui::Terminal::new(backend).map_err(|e| e.to_string())?;
 
     let size = term.size().map_err(|e| e.to_string())?;
-    let grid_rows = size.height.saturating_sub(1);
-    let grid_cols = size.width;
+    let mut grid_rows = size.height.saturating_sub(1);
+    let mut grid_cols = size.width;
 
     let mut ws = workspace::Workspace::spawn_all(&cfg.tabs, grid_rows, grid_cols).map_err(|e| e.to_string())?;
 
@@ -51,13 +51,29 @@ fn run() -> Result<(), String> {
     let tick = Duration::from_millis(16);
 
     let result: Result<(), String> = (|| {
-        loop {
+        'main: loop {
             if ws.poll_all().map_err(|e| e.to_string())? {
                 dirty = true;
             }
 
-            if ws.any_exited().map_err(|e| e.to_string())? {
-                break Ok(());
+            let exited = ws.exited_tabs().map_err(|e| e.to_string())?;
+            if !exited.is_empty() {
+                for &idx in &exited {
+                    ws.close_tab(idx);
+                }
+                if ws.all_dead() {
+                    break 'main Ok(());
+                }
+                if ws.is_dead(ws.active_idx()) {
+                    for i in 0..ws.labels().len() {
+                        if !ws.is_dead(i) {
+                            ws.switch_to(i);
+                            break;
+                        }
+                    }
+                }
+                mode = Mode::Normal;
+                dirty = true;
             }
 
             if crossterm::event::poll(tick).map_err(|e| e.to_string())? {
@@ -68,8 +84,10 @@ fn run() -> Result<(), String> {
                                 let menu = MenuState::new(&ws.labels());
                                 mode = Mode::Command(menu);
                                 dirty = true;
-                            } else if let Some(bytes) = compositor::key_to_bytes(&key) {
-                                ws.active_tab_mut().pty.write(&bytes).map_err(|e| e.to_string())?;
+                            } else if let Some(bytes) = compositor::key_to_bytes(&key)
+                                && let Some(ref mut pty) = ws.active_tab_mut().pty
+                            {
+                                pty.write(&bytes).map_err(|e| e.to_string())?;
                                 dirty = true;
                             }
                         }
@@ -92,26 +110,30 @@ fn run() -> Result<(), String> {
                             }
                             KeyCode::Enter => match &menu.items[menu.selected] {
                                 compositor::MenuItem::Tab { idx, .. } => {
+                                    if ws.is_dead(*idx) {
+                                        ws.relaunch(*idx, grid_rows, grid_cols).map_err(|e| e.to_string())?;
+                                    }
                                     ws.switch_to(*idx);
                                     mode = Mode::Normal;
                                     dirty = true;
                                 }
                                 compositor::MenuItem::Quit => {
-                                    break Ok(());
+                                    break 'main Ok(());
                                 }
                             },
                             KeyCode::Char(c) => {
-                                if c == 'q' {
-                                    break Ok(());
-                                } else if let Some(idx) = menu.find_by_shortcut(c) {
+                                if let Some(idx) = menu.find_by_shortcut(c) {
                                     match &menu.items[idx] {
                                         compositor::MenuItem::Tab { idx: tab_idx, .. } => {
+                                            if ws.is_dead(*tab_idx) {
+                                                ws.relaunch(*tab_idx, grid_rows, grid_cols).map_err(|e| e.to_string())?;
+                                            }
                                             ws.switch_to(*tab_idx);
                                             mode = Mode::Normal;
                                             dirty = true;
                                         }
                                         compositor::MenuItem::Quit => {
-                                            break Ok(());
+                                            break 'main Ok(());
                                         }
                                     }
                                 }
@@ -120,8 +142,9 @@ fn run() -> Result<(), String> {
                         },
                     },
                     Event::Resize(cols, rows) => {
-                        let r = rows.saturating_sub(1);
-                        ws.resize_all(r, cols).map_err(|e| e.to_string())?;
+                        grid_rows = rows.saturating_sub(1);
+                        grid_cols = cols;
+                        ws.resize_all(grid_rows, cols).map_err(|e| e.to_string())?;
                         term.resize(Rect::new(0, 0, cols, rows)).map_err(|e| e.to_string())?;
                         dirty = true;
                     }
