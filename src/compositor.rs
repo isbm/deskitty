@@ -87,6 +87,51 @@ impl Widget for &GradientRect {
     }
 }
 
+struct MenuShadow {
+    area: Rect,
+}
+
+impl Widget for &MenuShadow {
+    fn render(self, _area: Rect, buf: &mut Buffer) {
+        let shadow_bg = Color::Black;
+        let shadow_fg = Color::DarkGray;
+        let buf_area = buf.area();
+        let max_x = buf_area.right().saturating_sub(1);
+        let max_y = buf_area.bottom().saturating_sub(1);
+
+        let x = self.area.x;
+        let y = self.area.y;
+        let w = self.area.width;
+        let h = self.area.height;
+
+        for idx in 0..w {
+            let sx = x.saturating_add(2).saturating_add(idx);
+            let sy = y.saturating_add(h);
+            if sx > max_x || sy > max_y {
+                continue;
+            }
+            if let Some(cell) = buf.cell_mut((sx, sy)) {
+                cell.set_bg(shadow_bg);
+                cell.set_fg(shadow_fg);
+            }
+        }
+
+        for offset in 0..2u16 {
+            for idx in 0..h {
+                let sx = x.saturating_add(w).saturating_add(offset);
+                let sy = y.saturating_add(idx).saturating_add(1);
+                if sx > max_x || sy > max_y {
+                    continue;
+                }
+                if let Some(cell) = buf.cell_mut((sx, sy)) {
+                    cell.set_bg(shadow_bg);
+                    cell.set_fg(shadow_fg);
+                }
+            }
+        }
+    }
+}
+
 struct DashedTitle<'a> {
     text: &'a str,
     text_fg: Color,
@@ -191,6 +236,8 @@ fn render_menu(f: &mut Frame, area: Rect, menu: &MenuState) {
     let x = area.x + (area.width.saturating_sub(menu_width)) / 2;
     let y = area.y + (area.height.saturating_sub(menu_height)) / 2;
     let menu_area = Rect::new(x, y, menu_width, menu_height);
+
+    f.render_widget(&MenuShadow { area: menu_area }, area);
 
     let grad_dark = Color::Rgb(30, 30, 40);
     let grad_light = Color::Rgb(50, 50, 65);
