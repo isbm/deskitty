@@ -6,8 +6,8 @@ mod terminal;
 mod workspace;
 
 use compositor::{MenuState, Mode};
-use crossterm::event::{Event, KeyCode, KeyModifiers};
 use crossterm::ExecutableCommand;
+use crossterm::event::{Event, KeyCode, KeyModifiers};
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::Rect;
 use std::io;
@@ -130,11 +130,10 @@ fn run() -> Result<(), String> {
             }
 
             if dirty {
-                term
-                    .draw(|f| {
-                        compositor::render(f, ws.active_tab().terminal.screen(), &ws.labels(), ws.active_idx(), &mode);
-                    })
-                    .map_err(|e| e.to_string())?;
+                term.draw(|f| {
+                    compositor::render(f, ws.active_tab().terminal.screen(), &ws.labels(), ws.active_idx(), &mode);
+                })
+                .map_err(|e| e.to_string())?;
                 dirty = false;
             }
         }

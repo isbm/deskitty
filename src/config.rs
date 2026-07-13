@@ -1,12 +1,14 @@
 use serde::Deserialize;
 use std::path::PathBuf;
 
+/// Top-level YAML config schema.
 #[derive(Debug, Deserialize)]
 pub struct Config {
     #[serde(default)]
     pub tabs: Vec<TabConfig>,
 }
 
+/// A single tab definition from the YAML config.
 #[derive(Debug, Deserialize, Clone)]
 pub struct TabConfig {
     pub name: String,
@@ -16,21 +18,22 @@ pub struct TabConfig {
     pub default: bool,
 }
 
+/// Load config from the given path, falling back to
+/// `~/.config/deskitty/config.yaml`, and finally to a single `bash` tab.
 pub fn load(path: Option<&str>) -> Config {
-    if let Some(p) = path {
-        if let Ok(cfg) = load_from_path(&PathBuf::from(p)) {
-            if !cfg.tabs.is_empty() {
-                return cfg;
-            }
-        }
+    if let Some(p) = path
+        && let Ok(cfg) = load_from_path(&PathBuf::from(p))
+        && !cfg.tabs.is_empty()
+    {
+        return cfg;
     }
 
     let home = std::env::var("HOME").unwrap_or_default();
     let default_path = PathBuf::from(home).join(".config/deskitty/config.yaml");
-    if let Ok(cfg) = load_from_path(&default_path) {
-        if !cfg.tabs.is_empty() {
-            return cfg;
-        }
+    if let Ok(cfg) = load_from_path(&default_path)
+        && !cfg.tabs.is_empty()
+    {
+        return cfg;
     }
 
     default_config()
@@ -42,12 +45,5 @@ fn load_from_path(path: &PathBuf) -> anyhow::Result<Config> {
 }
 
 fn default_config() -> Config {
-    Config {
-        tabs: vec![TabConfig {
-            name: "Shell".to_string(),
-            shortcut: 's',
-            command: vec!["bash".to_string()],
-            default: true,
-        }],
-    }
+    Config { tabs: vec![TabConfig { name: "Shell".to_string(), shortcut: 's', command: vec!["bash".to_string()], default: true }] }
 }

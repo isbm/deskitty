@@ -2,8 +2,10 @@ use clap::builder::styling;
 use clap::{Arg, ArgAction, Command};
 use colored::Colorize;
 
+/// Application name used in help output and usage strings.
 pub static APPNAME: &str = "deskitty";
 
+/// Build the CLI definition (bunkerbox-style clap configuration).
 pub fn cli(version: &'static str) -> Command {
     let styles = styling::Styles::styled()
         .header(styling::AnsiColor::Yellow.on_default())

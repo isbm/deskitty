@@ -1,39 +1,39 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
-use ratatui::Frame;
 
+/// An entry in the command-mode popup menu.
 pub enum MenuItem {
+    /// Switch to a tab.
     Tab { idx: usize, shortcut: char, name: String },
+    /// Quit deskitty entirely.
     Quit,
 }
 
+/// The command-mode popup menu state.
 pub struct MenuState {
     pub items: Vec<MenuItem>,
     pub selected: usize,
 }
 
 impl MenuState {
+    /// Build a menu from tab labels. A `Quit` entry is always appended.
     pub fn new(labels: &[(char, String)]) -> Self {
-        let mut items: Vec<MenuItem> = labels
-            .iter()
-            .enumerate()
-            .map(|(idx, (shortcut, name))| MenuItem::Tab {
-                idx,
-                shortcut: *shortcut,
-                name: name.clone(),
-            })
-            .collect();
+        let mut items: Vec<MenuItem> =
+            labels.iter().enumerate().map(|(idx, (shortcut, name))| MenuItem::Tab { idx, shortcut: *shortcut, name: name.clone() }).collect();
         items.push(MenuItem::Quit);
         Self { items, selected: 0 }
     }
 
+    /// Move selection one item down (wrapping).
     pub fn next(&mut self) {
         self.selected = (self.selected + 1) % self.items.len();
     }
 
+    /// Move selection one item up (wrapping).
     pub fn prev(&mut self) {
         if self.selected == 0 {
             self.selected = self.items.len() - 1;
@@ -42,6 +42,9 @@ impl MenuState {
         }
     }
 
+    /// Find the index of the item matching the given shortcut character.
+    ///
+    /// Returns `None` if no item matches.
     pub fn find_by_shortcut(&self, c: char) -> Option<usize> {
         self.items.iter().position(|item| match item {
             MenuItem::Tab { shortcut, .. } => *shortcut == c,
@@ -50,18 +53,19 @@ impl MenuState {
     }
 }
 
+/// Current interaction mode.
 pub enum Mode {
+    /// Keys are forwarded to the active tab's PTY.
     Normal,
+    /// A popup menu is displayed; keys navigate the menu.
     Command(MenuState),
 }
 
+/// Render the full frame: terminal grid, status bar, and optional command menu.
 pub fn render(f: &mut Frame, screen: &vt100::Screen, labels: &[(char, String)], active_idx: usize, mode: &Mode) {
     let area = f.area();
 
-    let layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(1), Constraint::Length(1)])
-        .split(area);
+    let layout = Layout::default().direction(Direction::Vertical).constraints([Constraint::Min(1), Constraint::Length(1)]).split(area);
 
     let grid_area = layout[0];
     let status_area = layout[1];
@@ -121,11 +125,7 @@ fn render_status_bar(f: &mut Frame, area: Rect, labels: &[(char, String)], activ
         if i > 0 {
             spans.push(Span::styled(" | ", Style::default().fg(base_fg)));
         }
-        let text = if i == active_idx {
-            format!("*{}:{}*", shortcut, name)
-        } else {
-            format!("{}:{}", shortcut, name)
-        };
+        let text = if i == active_idx { format!("*{}:{}*", shortcut, name) } else { format!("{}:{}", shortcut, name) };
         let style = Style::default().fg(base_fg).add_modifier(if i == active_idx { Modifier::BOLD } else { Modifier::empty() });
         spans.push(Span::styled(text, style));
     }
@@ -161,11 +161,8 @@ fn render_menu(f: &mut Frame, area: Rect, menu: &MenuState) {
         let indicator = if i == menu.selected { ">" } else { " " };
         let text = format!("{indicator} {shortcut_text}  {label}");
 
-        let style = if i == menu.selected {
-            Style::default().fg(Color::Black).bg(Color::White)
-        } else {
-            Style::default().fg(Color::White).bg(Color::Black)
-        };
+        let style =
+            if i == menu.selected { Style::default().fg(Color::Black).bg(Color::White) } else { Style::default().fg(Color::White).bg(Color::Black) };
         lines.push(Line::from(Span::styled(text, style)));
     }
 
@@ -209,15 +206,15 @@ fn to_ratatui_color(c: vt100::Color) -> Color {
     }
 }
 
+/// Convert a crossterm key event into the raw bytes to write to the PTY.
+///
+/// Returns `None` if the key cannot be represented (e.g. unsupported modifier
+/// combinations).
 pub fn key_to_bytes(key: &KeyEvent) -> Option<Vec<u8>> {
     match key.code {
         KeyCode::Char(c) => {
             if key.modifiers.contains(KeyModifiers::CONTROL) {
-                if c.is_ascii_alphabetic() {
-                    Some(vec![(c.to_ascii_lowercase() as u8) & 0x1f])
-                } else {
-                    None
-                }
+                if c.is_ascii_alphabetic() { Some(vec![(c.to_ascii_lowercase() as u8) & 0x1f]) } else { None }
             } else if key.modifiers.contains(KeyModifiers::ALT) {
                 let mut v = vec![0x1b];
                 let mut buf = [0u8; 4];
