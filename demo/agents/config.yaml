@@ -1,0 +1,8 @@
+tabs:
+  - name: "OpenCode"
+    shortcut: "o"
+    command: ["opencode"]
+    default: true
+  - name: "Shell"
+    shortcut: "s"
+    command: ["bash"]
