@@ -2,7 +2,7 @@
 
 **A terminal workspace manager for TUI applications.**
 
-Deskty is a compositor that runs multiple interactive terminal programs inside a single window and lets you switch between them. Think of it as a minimal tab-based wrapper: each tab holds a full terminal session with 256-color and 24-bit RGB emulation, and you toggle between them with a popup menu.
+Deskitty is a compositor that runs multiple interactive terminal programs inside a single window and lets you switch between them. Think of it as a minimal tab-based wrapper: each tab holds a full terminal session with 256-color and 24-bit RGB emulation, and you toggle between them with a popup menu.
 
 It is built for a world where developers keep several terminal-based tools open at once — a shell here, OpenCode there, a process monitor in the corner — and want to stay inside one terminal window without giving up the feel of a real terminal.
 
@@ -14,7 +14,7 @@ Launch deskitty with a config file that names your tabs:
 deskitty -c demo/agents/config.yaml
 ```
 
-Deskty enters fullscreen mode. Each tab runs its own program inside a pseudo-terminal. The active tab renders at full size with complete terminal emulation. A status bar sits at the bottom showing all open tabs and the current one highlighted.
+Deskitty enters fullscreen mode. Each tab runs its own program inside a pseudo-terminal. The active tab renders at full size with complete terminal emulation. A status bar sits at the bottom showing all open tabs and the current one highlighted.
 
 Press `Ctrl+\` anywhere to bring up the command menu. Switch tabs by selecting one with the arrow keys or pressing its shortcut letter. The menu dismisses with `Esc`, and `q` quits the whole session.
 
@@ -50,7 +50,7 @@ The config is optional. Without it, deskitty starts a single `bash` tab.
 
 ## How it is built
 
-Deskty is written in Rust. The rendering stack uses Ratatui for layout and compositing, Crossterm for raw terminal I/O, a `vt100`-backed cell grid for ANSI parsing, and `portable-pty` for pseudo-terminal management.
+Deskitty is written in Rust. The rendering stack uses Ratatui for layout and compositing, Crossterm for raw terminal I/O, a `vt100`-backed cell grid for ANSI parsing, and `portable-pty` for pseudo-terminal management.
 
 The entire frame — terminal grid, status bar, and popup menu — is assembled by Ratatui on each tick. Child output flows from the PTY into the ANSI parser, which pushes styled cells onto the grid. Key presses flow the other direction, through Crossterm into the active PTY.
 
@@ -67,4 +67,4 @@ Just `make` prints the available targets.
 
 ## Status
 
-Deskty is in an early stage. The current version proves the core architecture: PTY spawning, full terminal emulation, Ratatui compositing, multi-tab management, and a popup command menu. More features are planned but not yet built.
+Deskitty is in an early stage. The current version proves the core architecture: PTY spawning, full terminal emulation, Ratatui compositing, multi-tab management, and a popup command menu. More features are planned but not yet built.
