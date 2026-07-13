@@ -1,4 +1,4 @@
-# Deskty
+# Deskitty
 
 **A terminal workspace manager for TUI applications.**
 
