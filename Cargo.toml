@@ -1,0 +1,16 @@
+[package]
+name = "deskitty"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+portable-pty = "0.8"
+libc = "0.2"
+vt100 = "0.16"
+clap = "4"
+colored = "3"
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
+ratatui = "0.30"
+crossterm = "0.28"
+anyhow = "1"
