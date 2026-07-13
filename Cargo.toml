@@ -14,3 +14,4 @@ serde_yaml = "0.9"
 ratatui = "0.30"
 crossterm = "0.28"
 anyhow = "1"
+ratatui-glamour = { git = "https://github.com/tinythings/ratatui-glamour.git" }

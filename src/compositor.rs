@@ -1,9 +1,12 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::Frame;
+use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use ratatui::widgets::{Block, Borders, Paragraph, Widget};
+use ratatui_glamour::color::blend_2d;
+use ratatui_glamour::rule::dashed_title;
 
 /// An entry in the command-mode popup menu.
 pub enum MenuItem {
@@ -61,6 +64,42 @@ pub enum Mode {
     Command(MenuState),
 }
 
+struct GradientRect {
+    colors: Vec<Color>,
+    width: u16,
+}
+
+impl Widget for &GradientRect {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        for y in area.top()..area.bottom() {
+            for x in area.left()..area.right() {
+                let local_x = (x - area.x) as usize;
+                let local_y = (y - area.y) as usize;
+                let idx = local_y * self.width as usize + local_x;
+                if let Some(&color) = self.colors.get(idx)
+                    && let Some(cell) = buf.cell_mut((x, y))
+                {
+                    cell.reset();
+                    cell.set_bg(color);
+                }
+            }
+        }
+    }
+}
+
+struct DashedTitle<'a> {
+    text: &'a str,
+    text_fg: Color,
+    grad_start: Color,
+    grad_end: Color,
+}
+
+impl Widget for &DashedTitle<'_> {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        dashed_title(area, buf, self.text, self.text_fg, self.grad_start, self.grad_end);
+    }
+}
+
 /// Render the full frame: terminal grid, status bar, and optional command menu.
 pub fn render(f: &mut Frame, screen: &vt100::Screen, labels: &[(char, String)], active_idx: usize, mode: &Mode) {
     let area = f.area();
@@ -115,10 +154,13 @@ fn render_terminal_grid(f: &mut Frame, area: Rect, screen: &vt100::Screen) {
 }
 
 fn render_status_bar(f: &mut Frame, area: Rect, labels: &[(char, String)], active_idx: usize, mode: &Mode) {
-    let (bg, base_fg) = match mode {
-        Mode::Normal => (Color::Blue, Color::White),
-        Mode::Command(_) => (Color::Yellow, Color::Black),
+    let (grad_start, grad_end, base_fg) = match mode {
+        Mode::Normal => (Color::Rgb(20, 40, 100), Color::Rgb(40, 70, 160), Color::White),
+        Mode::Command(_) => (Color::Rgb(140, 110, 20), Color::Rgb(180, 160, 50), Color::Black),
     };
+
+    let grad_colors = blend_2d(area.width as usize, 1, 0.0, &[grad_start, grad_end]);
+    f.render_widget(&GradientRect { colors: grad_colors, width: area.width }, area);
 
     let mut spans: Vec<Span> = Vec::new();
     for (i, (shortcut, name)) in labels.iter().enumerate() {
@@ -138,19 +180,41 @@ fn render_status_bar(f: &mut Frame, area: Rect, labels: &[(char, String)], activ
     };
     spans.push(Span::styled(hint, Style::default().fg(Color::DarkGray)));
 
-    let line = Line::from(spans).style(Style::default().bg(bg));
+    let line = Line::from(spans);
     f.render_widget(Paragraph::new(line), area);
 }
 
 fn render_menu(f: &mut Frame, area: Rect, menu: &MenuState) {
-    let menu_width: u16 = 24;
-    let menu_height = (menu.items.len() + 2) as u16;
+    let menu_width: u16 = 32;
+    let menu_height = (menu.items.len() + 4) as u16;
 
     let x = area.x + (area.width.saturating_sub(menu_width)) / 2;
     let y = area.y + (area.height.saturating_sub(menu_height)) / 2;
     let menu_area = Rect::new(x, y, menu_width, menu_height);
 
-    f.render_widget(Clear, menu_area);
+    let grad_dark = Color::Rgb(30, 30, 40);
+    let grad_light = Color::Rgb(50, 50, 65);
+    let grad_colors = blend_2d(menu_width as usize, menu_height as usize, 10.0, &[grad_dark, grad_light]);
+    f.render_widget(&GradientRect { colors: grad_colors, width: menu_width }, menu_area);
+
+    let block = Block::default().borders(Borders::ALL).border_set(ratatui::symbols::border::ROUNDED);
+    let inner_area = block.inner(menu_area);
+    f.render_widget(block, menu_area);
+
+    let title_rect = Rect::new(inner_area.x, inner_area.y, inner_area.width, 1);
+    f.render_widget(
+        &DashedTitle {
+            text: "Tab Menu",
+            text_fg: Color::White,
+            grad_start: Color::Rgb(100, 100, 180),
+            grad_end: Color::Rgb(40, 40, 80),
+        },
+        title_rect,
+    );
+
+    let inner_width = inner_area.width as usize;
+    let items_start = inner_area.y + 2;
+    let items_height = (menu.items.len()) as u16;
 
     let mut lines: Vec<Line> = Vec::new();
     for (i, item) in menu.items.iter().enumerate() {
@@ -158,19 +222,17 @@ fn render_menu(f: &mut Frame, area: Rect, menu: &MenuState) {
             MenuItem::Tab { shortcut, name, .. } => (shortcut.to_string(), name.clone()),
             MenuItem::Quit => ("q".to_string(), "Quit".to_string()),
         };
-        let indicator = if i == menu.selected { ">" } else { " " };
-        let text = format!("{indicator} {shortcut_text}  {label}");
+        let raw = format!(" {label}");
+        let text = format!("{:<width$}{}", raw, shortcut_text, width = inner_width - shortcut_text.len());
 
         let style =
-            if i == menu.selected { Style::default().fg(Color::Black).bg(Color::White) } else { Style::default().fg(Color::White).bg(Color::Black) };
+            if i == menu.selected { Style::default().fg(Color::Black).bg(Color::White) } else { Style::default().fg(Color::White) };
         lines.push(Line::from(Span::styled(text, style)));
     }
 
     let text = Text::from(lines);
-    let block = Block::default().borders(Borders::ALL).title(" Tab Menu ");
-    let inner_area = block.inner(menu_area);
-    f.render_widget(block, menu_area);
-    f.render_widget(Paragraph::new(text), inner_area);
+    let items_area = Rect::new(inner_area.x, items_start, inner_area.width, items_height);
+    f.render_widget(Paragraph::new(text), items_area);
 }
 
 fn cell_to_span(cell: &vt100::Cell) -> Span<'_> {
