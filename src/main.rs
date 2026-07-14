@@ -1,7 +1,9 @@
 mod clidef;
 mod compositor;
 mod config;
+mod palette;
 mod pty;
+mod sysinfo;
 mod terminal;
 mod workspace;
 
@@ -41,8 +43,8 @@ fn run() -> Result<(), String> {
     let mut term = ratatui::Terminal::new(backend).map_err(|e| e.to_string())?;
 
     let size = term.size().map_err(|e| e.to_string())?;
-    let mut grid_rows = size.height.saturating_sub(1);
-    let mut grid_cols = size.width;
+    let mut grid_rows = size.height.saturating_sub(3);
+    let mut grid_cols = size.width.saturating_sub(2);
 
     let mut ws = workspace::Workspace::spawn_all(&cfg.tabs, grid_rows, grid_cols).map_err(|e| e.to_string())?;
 
@@ -142,9 +144,9 @@ fn run() -> Result<(), String> {
                         },
                     },
                     Event::Resize(cols, rows) => {
-                        grid_rows = rows.saturating_sub(1);
-                        grid_cols = cols;
-                        ws.resize_all(grid_rows, cols).map_err(|e| e.to_string())?;
+                        grid_rows = rows.saturating_sub(3);
+                        grid_cols = cols.saturating_sub(2);
+                        ws.resize_all(grid_rows, grid_cols).map_err(|e| e.to_string())?;
                         term.resize(Rect::new(0, 0, cols, rows)).map_err(|e| e.to_string())?;
                         dirty = true;
                     }
@@ -153,8 +155,9 @@ fn run() -> Result<(), String> {
             }
 
             if dirty {
+                let info = sysinfo::gather();
                 term.draw(|f| {
-                    compositor::render(f, ws.active_tab().terminal.screen(), &ws.labels(), ws.active_idx(), &mode);
+                    compositor::render(f, ws.active_tab().terminal.screen(), &ws.labels(), ws.active_idx(), &mode, info.as_ref());
                 })
                 .map_err(|e| e.to_string())?;
                 dirty = false;

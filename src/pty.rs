@@ -21,11 +21,19 @@ impl Pty {
         let pair = pty_system.openpty(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })?;
 
         let mut cmd = CommandBuilder::new(&command[0]);
+        cmd.env("TERM", "xterm-256color");
+        cmd.env("COLORTERM", "truecolor");
+        cmd.env("TERM_PROGRAM", "deskitty");
         if command.len() > 1 {
             cmd.args(&command[1..]);
         }
 
         let child = pair.slave.spawn_command(cmd)?;
+
+        let actual_size = pair.master.get_size()?;
+        if actual_size.rows != rows || actual_size.cols != cols {
+            pair.master.resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })?;
+        }
 
         let raw_fd = pair.master.as_raw_fd();
         if let Some(fd) = raw_fd {
