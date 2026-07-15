@@ -1,6 +1,7 @@
 use std::io;
 
 use crate::config::TabConfig;
+use crate::proc::ProcStat;
 use crate::pty;
 use crate::terminal;
 
@@ -14,6 +15,7 @@ pub struct Tab {
     pub command: Vec<String>,
     pub pty: Option<pty::Pty>,
     pub terminal: terminal::Terminal,
+    pub proc_stat: Option<ProcStat>,
 }
 
 /// Manages multiple terminal tabs, only one of which is visible at a time.
@@ -28,8 +30,9 @@ impl Workspace {
         let mut tabs = Vec::new();
         for tc in tab_configs {
             let pty = pty::Pty::spawn(rows, cols, &tc.command)?;
+            let proc_stat = pty.process_id().map(ProcStat::new);
             let terminal = terminal::Terminal::new(rows, cols);
-            tabs.push(Tab { name: tc.name.clone(), shortcut: tc.shortcut, command: tc.command.clone(), pty: Some(pty), terminal });
+            tabs.push(Tab { name: tc.name.clone(), shortcut: tc.shortcut, command: tc.command.clone(), pty: Some(pty), terminal, proc_stat });
         }
 
         let active = tab_configs.iter().position(|t| t.default).unwrap_or(0);
@@ -130,6 +133,7 @@ impl Workspace {
     pub fn relaunch(&mut self, idx: usize, rows: u16, cols: u16) -> anyhow::Result<()> {
         let tab = &mut self.tabs[idx];
         tab.pty = Some(pty::Pty::spawn(rows, cols, &tab.command)?);
+        tab.proc_stat = tab.pty.as_ref().and_then(|p| p.process_id()).map(ProcStat::new);
         tab.terminal = terminal::Terminal::new(rows, cols);
         Ok(())
     }
@@ -137,5 +141,23 @@ impl Workspace {
     /// Returns `true` if every tab is dead.
     pub fn all_dead(&self) -> bool {
         self.tabs.iter().all(|t| t.pty.is_none())
+    }
+
+    /// Poll CPU jiffies for all non-active tabs.
+    ///
+    /// Returns `true` if any background tab consumed CPU since the last poll.
+    pub fn background_active(&mut self, active_idx: usize) -> bool {
+        for (i, tab) in self.tabs.iter_mut().enumerate() {
+            if i == active_idx {
+                continue;
+            }
+            if let Some(ref mut ps) = tab.proc_stat
+                && let Some((_total, delta)) = ps.poll()
+                && delta > 0
+            {
+                return true;
+            }
+        }
+        false
     }
 }

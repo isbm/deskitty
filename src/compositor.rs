@@ -181,7 +181,7 @@ fn bottom_right_corner_color(area: Rect, stops: &[Color]) -> Color {
 }
 
 /// Render the full frame: terminal grid, status bar, and optional command menu.
-pub fn render(f: &mut Frame, screen: &vt100::Screen, labels: &[(char, String)], active_idx: usize, mode: &Mode, sysinfo: Option<&SysInfo>) {
+pub fn render(f: &mut Frame, screen: &vt100::Screen, labels: &[(char, String)], active_idx: usize, mode: &Mode, sysinfo: Option<&SysInfo>, bg_active: bool) {
     let area = f.area();
 
     let border_stops =
@@ -194,7 +194,7 @@ pub fn render(f: &mut Frame, screen: &vt100::Screen, labels: &[(char, String)], 
     let status_rect = Rect::new(area.x + 1, area.bottom() - 1, area.width.saturating_sub(2), 1);
 
     render_terminal_grid(f, grid_rect, screen);
-    render_status_bar(f, status_rect, labels, active_idx, mode, sysinfo, corner_color);
+    render_status_bar(f, status_rect, labels, active_idx, mode, sysinfo, corner_color, bg_active);
 
     if let Mode::Command(menu) = mode {
         render_menu(f, area, menu);
@@ -237,7 +237,8 @@ fn render_terminal_grid(f: &mut Frame, area: Rect, screen: &vt100::Screen) {
     }
 }
 
-fn render_status_bar(f: &mut Frame, area: Rect, _labels: &[(char, String)], _active_idx: usize, mode: &Mode, sysinfo: Option<&SysInfo>, corner_color: Color) {
+#[allow(clippy::too_many_arguments)]
+fn render_status_bar(f: &mut Frame, area: Rect, _labels: &[(char, String)], _active_idx: usize, mode: &Mode, sysinfo: Option<&SysInfo>, corner_color: Color, bg_active: bool) {
     let mut spans = vec![Span::styled("──", Style::default())];
 
     let load_bg = crate::palette::PROCESSING_BASE;
@@ -249,6 +250,7 @@ fn render_status_bar(f: &mut Frame, area: Rect, _labels: &[(char, String)], _act
     let mut fixed: usize = 2;
 
     let hint_text = match mode {
+        Mode::Normal if bg_active => " \u{F013}  Ctrl+\\ Menu ".to_string(),
         Mode::Normal => " Ctrl+\\ Menu ".to_string(),
         Mode::Command(_) => " Esc=Close ".to_string(),
     };
@@ -270,16 +272,15 @@ fn render_status_bar(f: &mut Frame, area: Rect, _labels: &[(char, String)], _act
         sys_spans.push(Span::styled(hint_text.clone(), Style::default().fg(Color::Black).add_modifier(Modifier::BOLD).bg(hint_bg)));
 
         fixed += 4;
-        fixed += load_text.len();
-        fixed += mem_text.len();
-        fixed += arch_text.len();
-        fixed -= 6;
-        fixed += hint_text.len();
+        fixed += load_text.chars().count();
+        fixed += mem_text.chars().count();
+        fixed += arch_text.chars().count();
+        fixed += hint_text.chars().count();
     } else {
         sys_spans.push(Span::styled("\u{E0B2}", Style::default().fg(hint_bg)));
         sys_spans.push(Span::styled(hint_text.clone(), Style::default().fg(Color::Black).add_modifier(Modifier::BOLD).bg(hint_bg)));
         fixed += 1;
-        fixed += hint_text.len();
+        fixed += hint_text.chars().count();
     }
 
     spans.append(&mut sys_spans);

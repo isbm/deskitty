@@ -2,6 +2,7 @@ mod clidef;
 mod compositor;
 mod config;
 mod palette;
+mod proc;
 mod pty;
 mod sysinfo;
 mod terminal;
@@ -156,8 +157,9 @@ fn run() -> Result<(), String> {
 
             if dirty {
                 let info = sysinfo::gather();
+                let bg_active = ws.background_active(ws.active_idx());
                 term.draw(|f| {
-                    compositor::render(f, ws.active_tab().terminal.screen(), &ws.labels(), ws.active_idx(), &mode, info.as_ref());
+                    compositor::render(f, ws.active_tab().terminal.screen(), &ws.labels(), ws.active_idx(), &mode, info.as_ref(), bg_active);
                 })
                 .map_err(|e| e.to_string())?;
                 dirty = false;
