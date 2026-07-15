@@ -51,6 +51,7 @@ fn run() -> Result<(), String> {
 
     let mut mode = Mode::Normal;
     let mut dirty = true;
+    let mut prev_bg_active = false;
     let tick = Duration::from_millis(16);
 
     let result: Result<(), String> = (|| {
@@ -155,9 +156,14 @@ fn run() -> Result<(), String> {
                 }
             }
 
+            let bg_active = ws.background_active(ws.active_idx());
+            if bg_active != prev_bg_active {
+                prev_bg_active = bg_active;
+                dirty = true;
+            }
+
             if dirty {
                 let info = sysinfo::gather();
-                let bg_active = ws.background_active(ws.active_idx());
                 term.draw(|f| {
                     compositor::render(f, ws.active_tab().terminal.screen(), &ws.labels(), ws.active_idx(), &mode, info.as_ref(), bg_active);
                 })

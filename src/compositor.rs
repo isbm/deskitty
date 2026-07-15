@@ -250,7 +250,6 @@ fn render_status_bar(f: &mut Frame, area: Rect, _labels: &[(char, String)], _act
     let mut fixed: usize = 2;
 
     let hint_text = match mode {
-        Mode::Normal if bg_active => " \u{F013}  Ctrl+\\ Menu ".to_string(),
         Mode::Normal => " Ctrl+\\ Menu ".to_string(),
         Mode::Command(_) => " Esc=Close ".to_string(),
     };
@@ -285,10 +284,13 @@ fn render_status_bar(f: &mut Frame, area: Rect, _labels: &[(char, String)], _act
 
     spans.append(&mut sys_spans);
 
-    let closing_width = 3;
+    let closing_width = if bg_active { 5 } else { 3 };
     let gradient_width = (area.width as usize).saturating_sub(fixed + closing_width);
 
     spans.push(Span::styled(" ".repeat(gradient_width), Style::default()));
+    if bg_active {
+        spans.push(Span::styled("\u{F013} ", Style::default().fg(crate::palette::ERROR).bg(corner_color)));
+    }
     spans.push(Span::styled("\u{E0B0}", Style::default().fg(corner_color)));
     spans.push(Span::styled("──", Style::default()));
 

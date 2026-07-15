@@ -145,19 +145,20 @@ impl Workspace {
 
     /// Poll CPU jiffies for all non-active tabs.
     ///
-    /// Returns `true` if any background tab consumed CPU since the last poll.
-    pub fn background_active(&mut self, active_idx: usize) -> bool {
-        for (i, tab) in self.tabs.iter_mut().enumerate() {
-            if i == active_idx {
-                continue;
-            }
-            if let Some(ref mut ps) = tab.proc_stat
-                && let Some((_total, delta)) = ps.poll()
-                && delta > 0
-            {
-                return true;
+    /// Returns `true` if any background tab was active within the last 500 ms.
+    pub fn background_active(&mut self, _active_idx: usize) -> bool {
+        let timeout = std::time::Duration::from_millis(500);
+        let mut any_active = false;
+        for tab in self.tabs.iter_mut() {
+            if let Some(ref mut ps) = tab.proc_stat {
+                if !ps.is_active(timeout) {
+                    let _ = ps.poll();
+                }
+                if ps.is_active(timeout) {
+                    any_active = true;
+                }
             }
         }
-        false
+        any_active
     }
 }
