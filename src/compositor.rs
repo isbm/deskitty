@@ -1,7 +1,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::Frame;
 use ratatui::buffer::Buffer;
-use ratatui::layout::Rect;
+use ratatui::layout::{Alignment, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph, Widget};
@@ -96,8 +96,8 @@ struct MenuShadow {
 
 impl Widget for &MenuShadow {
     fn render(self, _area: Rect, buf: &mut Buffer) {
-        let shadow_bg = Color::Black;
-        let shadow_fg = Color::DarkGray;
+        let shadow_bg = crate::palette::SHADOW_BG;
+        let shadow_fg = crate::palette::SHADOW_FG;
         let buf_area = buf.area();
         let max_x = buf_area.right().saturating_sub(1);
         let max_y = buf_area.bottom().saturating_sub(1);
@@ -258,7 +258,7 @@ fn render_status_bar(f: &mut Frame, area: Rect, _labels: &[(char, String)], _act
     if let Some(info) = sysinfo {
         let load_text = format!(" {} ", crate::sysinfo::load_string(info));
         let mem_text = format!(" {} ", crate::sysinfo::mem_string(info));
-        let arch_text = format!(" {} ", info.arch);
+        let arch_text = format!(" \u{F233}  {} ", info.arch);
 
         sys_spans.push(Span::styled("\u{E0B2}", Style::default().fg(load_bg)));
         sys_spans.push(Span::styled(load_text.clone(), white.bg(load_bg)));
@@ -273,6 +273,7 @@ fn render_status_bar(f: &mut Frame, area: Rect, _labels: &[(char, String)], _act
         fixed += load_text.len();
         fixed += mem_text.len();
         fixed += arch_text.len();
+        fixed -= 6;
         fixed += hint_text.len();
     } else {
         sys_spans.push(Span::styled("\u{E0B2}", Style::default().fg(hint_bg)));
@@ -301,7 +302,7 @@ fn render_status_bar(f: &mut Frame, area: Rect, _labels: &[(char, String)], _act
 }
 
 fn render_menu(f: &mut Frame, area: Rect, menu: &MenuState) {
-    let menu_width: u16 = 32;
+    let menu_width: u16 = 50;
     let menu_height = (menu.items.len() + 4) as u16;
 
     let x = area.x + (area.width.saturating_sub(menu_width)) / 2;
@@ -310,40 +311,62 @@ fn render_menu(f: &mut Frame, area: Rect, menu: &MenuState) {
 
     f.render_widget(&MenuShadow { area: menu_area }, area);
 
-    let grad_dark = Color::Rgb(30, 30, 40);
-    let grad_light = Color::Rgb(50, 50, 65);
-    let grad_colors = blend_2d(menu_width as usize, menu_height as usize, 10.0, &[grad_dark, grad_light]);
-    f.render_widget(&GradientRect { colors: grad_colors, width: menu_width }, menu_area);
+    let bg_colors = blend_2d(menu_width as usize, menu_height as usize, 10.0, &[crate::palette::BG_1, crate::palette::BG_2]);
+    f.render_widget(&GradientRect { colors: bg_colors, width: menu_width }, menu_area);
 
-    let block = Block::default().borders(Borders::ALL).border_set(ratatui::symbols::border::ROUNDED);
+    let title_line = Line::from(vec![
+        Span::styled("\u{E0B2}", Style::default().fg(crate::palette::PROCESSING_PEAK)),
+        Span::styled(" Tasks ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD).bg(crate::palette::PROCESSING_PEAK)),
+        Span::styled("\u{E0B0}", Style::default().fg(crate::palette::PROCESSING_PEAK)),
+    ]);
+
+    let block = Block::default()
+        .title(title_line)
+        .title_alignment(Alignment::Center)
+        .borders(Borders::ALL)
+        .border_set(ratatui::symbols::border::ROUNDED)
+        .border_style(Style::default().fg(crate::palette::PROCESSING_PEAK));
     let inner_area = block.inner(menu_area);
     f.render_widget(block, menu_area);
 
-    let title_rect = Rect::new(inner_area.x, inner_area.y, inner_area.width, 1);
+    let header_rect = Rect::new(inner_area.x, inner_area.y, inner_area.width, 1);
     f.render_widget(
-        &DashedTitle { text: "Applications", text_fg: Color::White, grad_start: Color::Rgb(100, 100, 180), grad_end: Color::Rgb(40, 40, 80) },
-        title_rect,
+        &DashedTitle { text: "Applications", text_fg: crate::palette::PRIMARY, grad_start: crate::palette::PROCESSING, grad_end: crate::palette::PROCESSING_DIMMED },
+        header_rect,
     );
 
+    let items_start_y = inner_area.y + 2;
     let inner_width = inner_area.width as usize;
-    let items_start = inner_area.y + 2;
-    let items_height = (menu.items.len()) as u16;
 
     let mut lines: Vec<Line> = Vec::new();
     for (i, item) in menu.items.iter().enumerate() {
-        let (shortcut_text, label) = match item {
-            MenuItem::Tab { shortcut, name, .. } => (shortcut.to_string(), name.clone()),
-            MenuItem::Quit => ("q".to_string(), "Quit".to_string()),
+        let (label, hint) = match item {
+            MenuItem::Tab { name, shortcut, .. } => (name.clone(), shortcut.to_uppercase().to_string()),
+            MenuItem::Quit => ("Quit".to_string(), "Q".to_string()),
         };
-        let raw = format!(" {label}");
-        let text = format!("{:<width$}{}", raw, shortcut_text, width = inner_width - shortcut_text.len());
 
-        let style = if i == menu.selected { Style::default().fg(Color::Black).bg(Color::White) } else { Style::default().fg(Color::White) };
-        lines.push(Line::from(Span::styled(text, style)));
+        let selected = i == menu.selected;
+        let item_style = if selected {
+            Style::default().fg(crate::palette::BLACK).bg(crate::palette::HIGHLIGHT)
+        } else {
+            Style::default().fg(crate::palette::FG)
+        };
+        let hint_style = if selected {
+            Style::default().fg(crate::palette::BG_0).bg(crate::palette::HIGHLIGHT)
+        } else {
+            Style::default().fg(crate::palette::PRIMARY)
+        };
+
+        let padding = inner_width.saturating_sub(label.len() + 1 + hint.len()).saturating_sub(2);
+        lines.push(Line::from(vec![
+            Span::styled(format!(" {label}{}", " ".repeat(padding)), item_style),
+            Span::styled(hint, hint_style),
+            Span::styled(" ", item_style),
+        ]));
     }
 
     let text = Text::from(lines);
-    let items_area = Rect::new(inner_area.x, items_start, inner_area.width, items_height);
+    let items_area = Rect::new(inner_area.x, items_start_y, inner_area.width, menu.items.len() as u16);
     f.render_widget(Paragraph::new(text), items_area);
 }
 

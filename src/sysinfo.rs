@@ -80,10 +80,10 @@ fn format_bytes(bytes: u64) -> String {
 }
 
 pub fn load_string(info: &SysInfo) -> String {
-    format!("CPU: {:.2} {:.2} {:.2}", info.load_1, info.load_5, info.load_15)
+    format!("\u{F2DB}  CPU: {:.2} {:.2} {:.2}", info.load_1, info.load_5, info.load_15)
 }
 
 pub fn mem_string(info: &SysInfo) -> String {
     let free = info.mem_total_bytes.saturating_sub(info.mem_used_bytes);
-    format!("Total: {} / Used: {} / Free: {}", format_bytes(info.mem_total_bytes), format_bytes(info.mem_used_bytes), format_bytes(free))
+    format!("\u{F1C0}  Total: {} / Used: {} / Free: {}", format_bytes(info.mem_total_bytes), format_bytes(info.mem_used_bytes), format_bytes(free))
 }
