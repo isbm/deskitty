@@ -374,6 +374,13 @@ fn render_menu(f: &mut Frame, area: Rect, menu: &MenuState) {
 }
 
 fn cell_to_span(cell: &vt100::Cell) -> Span<'_> {
+    let contents = cell.contents();
+    if contents.is_empty() {
+        return Span::styled(" ", Style::default()
+            .fg(to_ratatui_color(cell.fgcolor()))
+            .bg(to_ratatui_color(cell.bgcolor())));
+    }
+
     let mut modifiers = Modifier::empty();
 
     for (enabled, modifier) in [
