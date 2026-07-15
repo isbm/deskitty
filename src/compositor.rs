@@ -1,13 +1,15 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::Frame;
 use ratatui::buffer::Buffer;
-use ratatui::layout::Rect;
+use ratatui::layout::{Alignment, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph, Widget};
-use ratatui_glamour::color::{blend_2d, lerp_u8};
+use ratatui_glamour::color::{blend_1d, blend_2d, lerp_color};
 use ratatui_glamour::rule::dashed_title;
 use ratatui_glamour::surface::gradient_rounded_panel_lines;
+
+use crate::sysinfo::SysInfo;
 
 /// An entry in the command-mode popup menu.
 pub enum MenuItem {
@@ -94,8 +96,8 @@ struct MenuShadow {
 
 impl Widget for &MenuShadow {
     fn render(self, _area: Rect, buf: &mut Buffer) {
-        let shadow_bg = Color::Black;
-        let shadow_fg = Color::DarkGray;
+        let shadow_bg = crate::palette::SHADOW_BG;
+        let shadow_fg = crate::palette::SHADOW_FG;
         let buf_area = buf.area();
         let max_x = buf_area.right().saturating_sub(1);
         let max_y = buf_area.bottom().saturating_sub(1);
@@ -159,12 +161,32 @@ impl Widget for &GradientPanel {
     }
 }
 
+fn bottom_right_corner_color(area: Rect, stops: &[Color]) -> Color {
+    let w = area.width as usize;
+    let h = area.height as usize;
+    let perimeter_len = 2 * w + 2 * h - 4;
+    let corner_idx = w + h - 2;
+    if perimeter_len == 0 || stops.is_empty() {
+        return Color::Reset;
+    }
+    let pos = corner_idx as f32 / (perimeter_len - 1) as f32;
+    let segments = stops.len() - 1;
+    let scaled = pos * segments as f32;
+    let base = scaled.floor() as usize;
+    if base >= segments {
+        stops[segments]
+    } else {
+        lerp_color(stops[base], stops[base + 1], scaled - base as f32)
+    }
+}
+
 /// Render the full frame: terminal grid, status bar, and optional command menu.
-pub fn render(f: &mut Frame, screen: &vt100::Screen, labels: &[(char, String)], active_idx: usize, mode: &Mode) {
+pub fn render(f: &mut Frame, screen: &vt100::Screen, labels: &[(char, String)], active_idx: usize, mode: &Mode, sysinfo: Option<&SysInfo>) {
     let area = f.area();
 
     let border_stops =
         vec![Color::Rgb(255, 95, 135), Color::Rgb(135, 95, 255), Color::Rgb(0, 255, 255), Color::Rgb(135, 95, 255), Color::Rgb(255, 95, 135)];
+    let corner_color = bottom_right_corner_color(area, &border_stops);
     f.render_widget(&GradientPanel { stops: border_stops }, area);
 
     let inner = Rect::new(area.x + 1, area.y + 1, area.width.saturating_sub(2), area.height.saturating_sub(2));
@@ -172,7 +194,7 @@ pub fn render(f: &mut Frame, screen: &vt100::Screen, labels: &[(char, String)], 
     let status_rect = Rect::new(area.x + 1, area.bottom() - 1, area.width.saturating_sub(2), 1);
 
     render_terminal_grid(f, grid_rect, screen);
-    render_status_bar(f, status_rect, labels, active_idx, mode);
+    render_status_bar(f, status_rect, labels, active_idx, mode, sysinfo, corner_color);
 
     if let Mode::Command(menu) = mode {
         render_menu(f, area, menu);
@@ -215,67 +237,72 @@ fn render_terminal_grid(f: &mut Frame, area: Rect, screen: &vt100::Screen) {
     }
 }
 
-fn render_status_bar(f: &mut Frame, area: Rect, labels: &[(char, String)], active_idx: usize, _mode: &Mode) {
-    let bright = (60u8, 80u8, 200u8);
-    let dark = (25u8, 35u8, 90u8);
-    let hint_bg = Color::Rgb(dark.0, dark.1, dark.2);
-    let hint_fg = Color::Rgb(180, 180, 200);
-    let bold = Modifier::BOLD;
+fn render_status_bar(f: &mut Frame, area: Rect, _labels: &[(char, String)], _active_idx: usize, mode: &Mode, sysinfo: Option<&SysInfo>, corner_color: Color) {
+    let mut spans = vec![Span::styled("──", Style::default())];
 
-    let count = labels.len();
-    let bg_for = |i: usize| -> Color {
-        if count <= 1 {
-            return Color::Rgb(bright.0, bright.1, bright.2);
-        }
-        let t = i as f32 / (count) as f32;
-        let r = lerp_u8(bright.0, dark.0, t);
-        let g = lerp_u8(bright.1, dark.1, t);
-        let b = lerp_u8(bright.2, dark.2, t);
-        Color::Rgb(r, g, b)
+    let load_bg = crate::palette::PROCESSING_BASE;
+    let mem_bg = crate::palette::PROCESSING_GLOW;
+    let arch_bg = crate::palette::PROCESSING_HEAT;
+    let hint_bg = crate::palette::PROCESSING_PEAK;
+    let white = Style::default().fg(Color::White);
+
+    let mut fixed: usize = 2;
+
+    let hint_text = match mode {
+        Mode::Normal => " Ctrl+\\ Menu ".to_string(),
+        Mode::Command(_) => " Esc=Close ".to_string(),
     };
 
-    let fg_for = |i: usize| -> Color { if i == active_idx { Color::White } else { Color::Rgb(200, 200, 220) } };
+    let mut sys_spans: Vec<Span<'static>> = Vec::new();
 
-    let mod_for = |i: usize| -> Modifier { if i == active_idx { bold } else { Modifier::empty() } };
+    if let Some(info) = sysinfo {
+        let load_text = format!(" {} ", crate::sysinfo::load_string(info));
+        let mem_text = format!(" {} ", crate::sysinfo::mem_string(info));
+        let arch_text = format!(" \u{F233}  {} ", info.arch);
 
-    let first_bg = bg_for(0);
+        sys_spans.push(Span::styled("\u{E0B2}", Style::default().fg(load_bg)));
+        sys_spans.push(Span::styled(load_text.clone(), white.bg(load_bg)));
+        sys_spans.push(Span::styled("\u{E0B2}", Style::default().fg(mem_bg).bg(load_bg)));
+        sys_spans.push(Span::styled(mem_text.clone(), white.bg(mem_bg)));
+        sys_spans.push(Span::styled("\u{E0B2}", Style::default().fg(arch_bg).bg(mem_bg)));
+        sys_spans.push(Span::styled(arch_text.clone(), white.bg(arch_bg)));
+        sys_spans.push(Span::styled("\u{E0B2}", Style::default().fg(hint_bg).bg(arch_bg)));
+        sys_spans.push(Span::styled(hint_text.clone(), Style::default().fg(Color::Black).add_modifier(Modifier::BOLD).bg(hint_bg)));
 
-    let mut spans = vec![Span::styled("──", Style::default()), Span::styled("\u{E0B2}", Style::default().fg(first_bg))];
-
-    for (i, (shortcut, name)) in labels.iter().enumerate() {
-        let bg = bg_for(i);
-        spans.push(Span::styled(format!(" {}:{} ", shortcut, name), Style::default().fg(fg_for(i)).bg(bg).add_modifier(mod_for(i))));
-        if i + 1 < labels.len() {
-            let next_bg = bg_for(i + 1);
-            spans.push(Span::styled("\u{E0B2}", Style::default().fg(next_bg).bg(bg)));
-        }
+        fixed += 4;
+        fixed += load_text.len();
+        fixed += mem_text.len();
+        fixed += arch_text.len();
+        fixed -= 6;
+        fixed += hint_text.len();
+    } else {
+        sys_spans.push(Span::styled("\u{E0B2}", Style::default().fg(hint_bg)));
+        sys_spans.push(Span::styled(hint_text.clone(), Style::default().fg(Color::Black).add_modifier(Modifier::BOLD).bg(hint_bg)));
+        fixed += 1;
+        fixed += hint_text.len();
     }
 
-    let last_bg = bg_for(labels.len() - 1);
-    spans.push(Span::styled("\u{E0B2}", Style::default().fg(hint_bg).bg(last_bg)));
-    spans.push(Span::styled(" Ctrl+\\ Menu ", Style::default().fg(hint_fg).bg(hint_bg)));
+    spans.append(&mut sys_spans);
 
-    let mut fixed: usize = 1 + 2;
-    for (i, (shortcut, name)) in labels.iter().enumerate() {
-        fixed += format!(" {}:{} ", shortcut, name).len();
-        if i + 1 < labels.len() {
-            fixed += 1;
-        }
-    }
-    fixed += 1;
-    fixed += " Ctrl+\\ Menu ".len();
-    fixed += 1 + 2;
-    let pad = (area.width as usize).saturating_sub(fixed);
+    let closing_width = 3;
+    let gradient_width = (area.width as usize).saturating_sub(fixed + closing_width);
 
-    spans.push(Span::styled(" ".repeat(pad), Style::default().bg(hint_bg)));
-    spans.push(Span::styled("\u{E0B0}", Style::default().fg(hint_bg)));
+    spans.push(Span::styled(" ".repeat(gradient_width), Style::default()));
+    spans.push(Span::styled("\u{E0B0}", Style::default().fg(corner_color)));
     spans.push(Span::styled("──", Style::default()));
 
     f.render_widget(Paragraph::new(Line::from(spans)), area);
+
+    if gradient_width > 0 {
+        let colors = blend_1d(gradient_width, &[hint_bg, corner_color]);
+        let gradient_rect = GradientRect { colors, width: gradient_width as u16 };
+        let gradient_area = Rect::new(area.x + fixed as u16, area.y, gradient_width as u16, 1);
+        f.render_widget(&gradient_rect, gradient_area);
+    }
 }
 
 fn render_menu(f: &mut Frame, area: Rect, menu: &MenuState) {
-    let menu_width: u16 = 32;
+    let menu_width: u16 = 50;
     let menu_height = (menu.items.len() + 4) as u16;
 
     let x = area.x + (area.width.saturating_sub(menu_width)) / 2;
@@ -284,66 +311,86 @@ fn render_menu(f: &mut Frame, area: Rect, menu: &MenuState) {
 
     f.render_widget(&MenuShadow { area: menu_area }, area);
 
-    let grad_dark = Color::Rgb(30, 30, 40);
-    let grad_light = Color::Rgb(50, 50, 65);
-    let grad_colors = blend_2d(menu_width as usize, menu_height as usize, 10.0, &[grad_dark, grad_light]);
-    f.render_widget(&GradientRect { colors: grad_colors, width: menu_width }, menu_area);
+    let bg_colors = blend_2d(menu_width as usize, menu_height as usize, 10.0, &[crate::palette::BG_1, crate::palette::BG_2]);
+    f.render_widget(&GradientRect { colors: bg_colors, width: menu_width }, menu_area);
 
-    let block = Block::default().borders(Borders::ALL).border_set(ratatui::symbols::border::ROUNDED);
+    let title_line = Line::from(vec![
+        Span::styled("\u{E0B2}", Style::default().fg(crate::palette::PROCESSING_PEAK)),
+        Span::styled(" Tasks ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD).bg(crate::palette::PROCESSING_PEAK)),
+        Span::styled("\u{E0B0}", Style::default().fg(crate::palette::PROCESSING_PEAK)),
+    ]);
+
+    let block = Block::default()
+        .title(title_line)
+        .title_alignment(Alignment::Center)
+        .borders(Borders::ALL)
+        .border_set(ratatui::symbols::border::ROUNDED)
+        .border_style(Style::default().fg(crate::palette::PROCESSING_PEAK));
     let inner_area = block.inner(menu_area);
     f.render_widget(block, menu_area);
 
-    let title_rect = Rect::new(inner_area.x, inner_area.y, inner_area.width, 1);
+    let header_rect = Rect::new(inner_area.x, inner_area.y, inner_area.width, 1);
     f.render_widget(
-        &DashedTitle { text: "Applications", text_fg: Color::White, grad_start: Color::Rgb(100, 100, 180), grad_end: Color::Rgb(40, 40, 80) },
-        title_rect,
+        &DashedTitle { text: "Applications", text_fg: crate::palette::PRIMARY, grad_start: crate::palette::PROCESSING, grad_end: crate::palette::PROCESSING_DIMMED },
+        header_rect,
     );
 
+    let items_start_y = inner_area.y + 2;
     let inner_width = inner_area.width as usize;
-    let items_start = inner_area.y + 2;
-    let items_height = (menu.items.len()) as u16;
 
     let mut lines: Vec<Line> = Vec::new();
     for (i, item) in menu.items.iter().enumerate() {
-        let (shortcut_text, label) = match item {
-            MenuItem::Tab { shortcut, name, .. } => (shortcut.to_string(), name.clone()),
-            MenuItem::Quit => ("q".to_string(), "Quit".to_string()),
+        let (label, hint) = match item {
+            MenuItem::Tab { name, shortcut, .. } => (name.clone(), shortcut.to_uppercase().to_string()),
+            MenuItem::Quit => ("Quit".to_string(), "Q".to_string()),
         };
-        let raw = format!(" {label}");
-        let text = format!("{:<width$}{}", raw, shortcut_text, width = inner_width - shortcut_text.len());
 
-        let style = if i == menu.selected { Style::default().fg(Color::Black).bg(Color::White) } else { Style::default().fg(Color::White) };
-        lines.push(Line::from(Span::styled(text, style)));
+        let selected = i == menu.selected;
+        let item_style = if selected {
+            Style::default().fg(crate::palette::BLACK).bg(crate::palette::HIGHLIGHT)
+        } else {
+            Style::default().fg(crate::palette::FG)
+        };
+        let hint_style = if selected {
+            Style::default().fg(crate::palette::BG_0).bg(crate::palette::HIGHLIGHT)
+        } else {
+            Style::default().fg(crate::palette::PRIMARY)
+        };
+
+        let padding = inner_width.saturating_sub(label.len() + 1 + hint.len()).saturating_sub(2);
+        lines.push(Line::from(vec![
+            Span::styled(format!(" {label}{}", " ".repeat(padding)), item_style),
+            Span::styled(hint, hint_style),
+            Span::styled(" ", item_style),
+        ]));
     }
 
     let text = Text::from(lines);
-    let items_area = Rect::new(inner_area.x, items_start, inner_area.width, items_height);
+    let items_area = Rect::new(inner_area.x, items_start_y, inner_area.width, menu.items.len() as u16);
     f.render_widget(Paragraph::new(text), items_area);
 }
 
 fn cell_to_span(cell: &vt100::Cell) -> Span<'_> {
-    let fg = to_ratatui_color(cell.fgcolor());
-    let bg = to_ratatui_color(cell.bgcolor());
+    let mut modifiers = Modifier::empty();
 
-    let mut style = Style::default().fg(fg).bg(bg);
-
-    if cell.bold() {
-        style = style.add_modifier(Modifier::BOLD);
-    }
-    if cell.dim() {
-        style = style.add_modifier(Modifier::DIM);
-    }
-    if cell.italic() {
-        style = style.add_modifier(Modifier::ITALIC);
-    }
-    if cell.underline() {
-        style = style.add_modifier(Modifier::UNDERLINED);
-    }
-    if cell.inverse() {
-        style = style.add_modifier(Modifier::REVERSED);
+    for (enabled, modifier) in [
+        (cell.bold(), Modifier::BOLD),
+        (cell.dim(), Modifier::DIM),
+        (cell.italic(), Modifier::ITALIC),
+        (cell.underline(), Modifier::UNDERLINED),
+        (cell.inverse(), Modifier::REVERSED),
+    ] {
+        if enabled {
+            modifiers.insert(modifier);
+        }
     }
 
-    Span::styled(cell.contents().to_string(), style)
+    let style = Style::default()
+        .fg(to_ratatui_color(cell.fgcolor()))
+        .bg(to_ratatui_color(cell.bgcolor()))
+        .add_modifier(modifiers);
+
+    Span::styled(cell.contents().to_owned(), style)
 }
 
 fn to_ratatui_color(c: vt100::Color) -> Color {

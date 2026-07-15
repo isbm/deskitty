@@ -71,6 +71,9 @@ impl Workspace {
                     tab.terminal.process(&buf[..n]);
                     dirty = true;
                 }
+                for response in tab.terminal.drain_responses() {
+                    pty.write(&response).ok();
+                }
             }
         }
         Ok(dirty)
