@@ -148,7 +148,11 @@ impl Terminal {
                     self.escape_state = EscapeState::Ground;
                 }
                 EscapeState::Csi => {
-                    translated.push(byte);
+                    if byte == b'f' {
+                        translated.push(b'H');
+                    } else {
+                        translated.push(byte);
+                    }
                     if (0x40..=0x7e).contains(&byte) {
                         self.escape_state = EscapeState::Ground;
                     }
@@ -276,5 +280,14 @@ mod tests {
         let cell = terminal.screen().cell(0, 0).unwrap();
         assert_eq!(cell.contents(), "│");
         assert_eq!(cell.fgcolor(), vt100::Color::Idx(1));
+    }
+
+    #[test]
+    fn normalizes_hvp_to_cup() {
+        let mut terminal = Terminal::new(3, 3);
+
+        terminal.process(b"\x1b[2;3fX");
+
+        assert_eq!(terminal.screen().cell(1, 2).unwrap().contents(), "X");
     }
 }
