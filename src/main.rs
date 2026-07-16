@@ -8,6 +8,9 @@ mod sysinfo;
 mod terminal;
 mod workspace;
 
+#[cfg(test)]
+mod terminal_ut;
+
 use compositor::{MenuState, Mode};
 use crossterm::ExecutableCommand;
 use crossterm::event::{Event, KeyCode, KeyModifiers};
