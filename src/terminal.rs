@@ -10,9 +10,21 @@
 pub struct Terminal {
     parser: vt100::Parser,
     responses: Vec<Vec<u8>>,
-    dec_special_graphics: bool,
-    pending_escape: bool,
-    pending_charset_select: bool,
+    g0_dec_special_graphics: bool,
+    g1_dec_special_graphics: bool,
+    using_g1_charset: bool,
+    escape_state: EscapeState,
+    application_cursor_keys: bool,
+}
+
+#[derive(Clone, Copy)]
+enum EscapeState {
+    Ground,
+    Escape,
+    CharsetSelect(u8),
+    Csi,
+    String,
+    StringEscape,
 }
 
 impl Terminal {
@@ -21,9 +33,11 @@ impl Terminal {
         Self {
             parser: vt100::Parser::new(rows, cols, 0),
             responses: Vec::new(),
-            dec_special_graphics: false,
-            pending_escape: false,
-            pending_charset_select: false,
+            g0_dec_special_graphics: false,
+            g1_dec_special_graphics: false,
+            using_g1_charset: false,
+            escape_state: EscapeState::Ground,
+            application_cursor_keys: false,
         }
     }
 
@@ -34,6 +48,7 @@ impl Terminal {
     pub fn process(&mut self, bytes: &[u8]) {
         if bytes.contains(&0x1b) {
             self.handle_queries(bytes);
+            self.handle_cursor_mode(bytes);
         }
         let translated = self.translate_dec_special_graphics(bytes);
         self.parser.process(&translated);
@@ -43,6 +58,19 @@ impl Terminal {
     /// reports, etc.) and clear the queue.
     pub fn drain_responses(&mut self) -> Vec<Vec<u8>> {
         std::mem::take(&mut self.responses)
+    }
+
+    pub fn application_cursor_keys(&self) -> bool {
+        self.application_cursor_keys
+    }
+
+    fn handle_cursor_mode(&mut self, bytes: &[u8]) {
+        if bytes.windows(5).any(|w| w == b"\x1b[?1h") {
+            self.application_cursor_keys = true;
+        }
+        if bytes.windows(5).any(|w| w == b"\x1b[?1l") {
+            self.application_cursor_keys = false;
+        }
     }
 
     /// Resize the terminal grid after a window resize.
@@ -61,37 +89,90 @@ impl Terminal {
         self.parser.screen().size()
     }
 
+    fn active_dec_special_graphics(&self) -> bool {
+        if self.using_g1_charset {
+            self.g1_dec_special_graphics
+        } else {
+            self.g0_dec_special_graphics
+        }
+    }
+
     fn translate_dec_special_graphics(&mut self, bytes: &[u8]) -> Vec<u8> {
         let mut translated = Vec::with_capacity(bytes.len());
 
         for &byte in bytes {
-            if self.pending_charset_select {
-                self.pending_charset_select = false;
-                self.pending_escape = false;
-                self.dec_special_graphics = byte == b'0';
-                continue;
-            }
-
-            if self.pending_escape {
-                self.pending_escape = false;
-                if byte == b'(' {
-                    self.pending_charset_select = true;
-                    continue;
+            match self.escape_state {
+                EscapeState::Ground => match byte {
+                    0x1b => {
+                        self.escape_state = EscapeState::Escape;
+                    }
+                    0x0e => {
+                        self.using_g1_charset = true;
+                    }
+                    0x0f => {
+                        self.using_g1_charset = false;
+                    }
+                    0x20..=0x7e if self.active_dec_special_graphics() => {
+                        push_dec_special_graphic(&mut translated, byte);
+                    }
+                    _ => {
+                        translated.push(byte);
+                    }
+                },
+                EscapeState::Escape => match byte {
+                    b'(' | b')' => {
+                        self.escape_state = EscapeState::CharsetSelect(byte);
+                    }
+                    b'[' => {
+                        self.escape_state = EscapeState::Csi;
+                        translated.push(0x1b);
+                        translated.push(byte);
+                    }
+                    b']' | b'P' | b'^' | b'_' => {
+                        self.escape_state = EscapeState::String;
+                        translated.push(0x1b);
+                        translated.push(byte);
+                    }
+                    _ => {
+                        self.escape_state = EscapeState::Ground;
+                        translated.push(0x1b);
+                        translated.push(byte);
+                    }
+                },
+                EscapeState::CharsetSelect(charset) => {
+                    match charset {
+                        b'(' => self.g0_dec_special_graphics = byte == b'0',
+                        b')' => self.g1_dec_special_graphics = byte == b'0',
+                        _ => {}
+                    }
+                    self.escape_state = EscapeState::Ground;
                 }
-                translated.push(0x1b);
-                translated.push(byte);
-                continue;
-            }
-
-            if byte == 0x1b {
-                self.pending_escape = true;
-                continue;
-            }
-
-            if self.dec_special_graphics {
-                push_dec_special_graphic(&mut translated, byte);
-            } else {
-                translated.push(byte);
+                EscapeState::Csi => {
+                    if byte == b'f' {
+                        translated.push(b'H');
+                    } else {
+                        translated.push(byte);
+                    }
+                    if (0x40..=0x7e).contains(&byte) {
+                        self.escape_state = EscapeState::Ground;
+                    }
+                }
+                EscapeState::String => {
+                    translated.push(byte);
+                    match byte {
+                        0x07 => self.escape_state = EscapeState::Ground,
+                        0x1b => self.escape_state = EscapeState::StringEscape,
+                        _ => {}
+                    }
+                }
+                EscapeState::StringEscape => {
+                    translated.push(byte);
+                    self.escape_state = if byte == b'\\' {
+                        EscapeState::Ground
+                    } else {
+                        EscapeState::String
+                    };
+                }
             }
         }
 

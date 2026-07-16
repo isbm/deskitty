@@ -181,7 +181,7 @@ fn bottom_right_corner_color(area: Rect, stops: &[Color]) -> Color {
 }
 
 /// Render the full frame: terminal grid, status bar, and optional command menu.
-pub fn render(f: &mut Frame, screen: &vt100::Screen, labels: &[(char, String)], active_idx: usize, mode: &Mode, sysinfo: Option<&SysInfo>) {
+pub fn render(f: &mut Frame, screen: &vt100::Screen, labels: &[(char, String)], active_idx: usize, mode: &Mode, sysinfo: Option<&SysInfo>, bg_active: bool) {
     let area = f.area();
 
     let border_stops =
@@ -194,7 +194,7 @@ pub fn render(f: &mut Frame, screen: &vt100::Screen, labels: &[(char, String)], 
     let status_rect = Rect::new(area.x + 1, area.bottom() - 1, area.width.saturating_sub(2), 1);
 
     render_terminal_grid(f, grid_rect, screen);
-    render_status_bar(f, status_rect, labels, active_idx, mode, sysinfo, corner_color);
+    render_status_bar(f, status_rect, labels, active_idx, mode, sysinfo, corner_color, bg_active);
 
     if let Mode::Command(menu) = mode {
         render_menu(f, area, menu);
@@ -205,31 +205,58 @@ fn render_terminal_grid(f: &mut Frame, area: Rect, screen: &vt100::Screen) {
     let (rows, cols) = screen.size();
     let max_rows = area.height.min(rows);
     let max_cols = area.width.min(cols);
+    let buf = f.buffer_mut();
 
-    let mut lines = Vec::new();
     for row in 0..max_rows {
-        let mut spans: Vec<Span> = Vec::new();
-        let mut col_offset: u16 = 0;
-        while col_offset < max_cols {
-            if let Some(cell) = screen.cell(row, col_offset) {
+        let mut col: u16 = 0;
+        while col < max_cols {
+            let x = area.x + col;
+            let y = area.y + row;
+
+            if let Some(cell) = screen.cell(row, col) {
                 if cell.is_wide_continuation() {
-                    col_offset += 1;
+                    col += 1;
                     continue;
                 }
-                let span = cell_to_span(cell);
-                let width = if cell.is_wide() { 2 } else { 1 };
-                spans.push(span);
-                col_offset += width;
+
+                let mut style = Style::default()
+                    .fg(to_ratatui_color(cell.fgcolor()))
+                    .bg(to_ratatui_color(cell.bgcolor()));
+
+                if cell.bold()      { style = style.add_modifier(Modifier::BOLD); }
+                if cell.dim()       { style = style.add_modifier(Modifier::DIM); }
+                if cell.italic()    { style = style.add_modifier(Modifier::ITALIC); }
+                if cell.underline() { style = style.add_modifier(Modifier::UNDERLINED); }
+                if cell.inverse()   { style = style.add_modifier(Modifier::REVERSED); }
+
+                let ch = cell.contents();
+                let display = if ch.is_empty() { " " } else { ch };
+
+                if let Some(c) = buf.cell_mut((x, y)) {
+                    c.set_symbol(display);
+                    c.set_style(style);
+                }
+
+                if cell.is_wide() {
+                    if col + 1 < max_cols
+                        && let Some(c) = buf.cell_mut((x + 1, y))
+                    {
+                        c.set_symbol(" ");
+                        c.set_style(style);
+                    }
+                    col += 2;
+                } else {
+                    col += 1;
+                }
             } else {
-                spans.push(Span::raw(" "));
-                col_offset += 1;
+                if let Some(c) = buf.cell_mut((x, y)) {
+                    c.set_symbol(" ");
+                    c.set_style(Style::default());
+                }
+                col += 1;
             }
         }
-        lines.push(Line::from(spans));
     }
-
-    let text = Text::from(lines);
-    f.render_widget(Paragraph::new(text), area);
 
     let (cursor_row, cursor_col) = screen.cursor_position();
     if cursor_row < max_rows && cursor_col < max_cols {
@@ -237,7 +264,8 @@ fn render_terminal_grid(f: &mut Frame, area: Rect, screen: &vt100::Screen) {
     }
 }
 
-fn render_status_bar(f: &mut Frame, area: Rect, _labels: &[(char, String)], _active_idx: usize, mode: &Mode, sysinfo: Option<&SysInfo>, corner_color: Color) {
+#[allow(clippy::too_many_arguments)]
+fn render_status_bar(f: &mut Frame, area: Rect, _labels: &[(char, String)], _active_idx: usize, mode: &Mode, sysinfo: Option<&SysInfo>, corner_color: Color, bg_active: bool) {
     let mut spans = vec![Span::styled("──", Style::default())];
 
     let load_bg = crate::palette::PROCESSING_BASE;
@@ -250,7 +278,7 @@ fn render_status_bar(f: &mut Frame, area: Rect, _labels: &[(char, String)], _act
 
     let hint_text = match mode {
         Mode::Normal => " Ctrl+\\ Menu ".to_string(),
-        Mode::Command(_) => " Esc=Close ".to_string(),
+        Mode::Command(_) => " ESC Close ".to_string(),
     };
 
     let mut sys_spans: Vec<Span<'static>> = Vec::new();
@@ -267,27 +295,29 @@ fn render_status_bar(f: &mut Frame, area: Rect, _labels: &[(char, String)], _act
         sys_spans.push(Span::styled("\u{E0B2}", Style::default().fg(arch_bg).bg(mem_bg)));
         sys_spans.push(Span::styled(arch_text.clone(), white.bg(arch_bg)));
         sys_spans.push(Span::styled("\u{E0B2}", Style::default().fg(hint_bg).bg(arch_bg)));
-        sys_spans.push(Span::styled(hint_text.clone(), Style::default().fg(Color::Black).add_modifier(Modifier::BOLD).bg(hint_bg)));
+        sys_spans.push(Span::styled(hint_text.clone(), Style::default().fg(Color::White).add_modifier(Modifier::BOLD).bg(hint_bg)));
 
         fixed += 4;
-        fixed += load_text.len();
-        fixed += mem_text.len();
-        fixed += arch_text.len();
-        fixed -= 6;
-        fixed += hint_text.len();
+        fixed += load_text.chars().count();
+        fixed += mem_text.chars().count();
+        fixed += arch_text.chars().count();
+        fixed += hint_text.chars().count();
     } else {
         sys_spans.push(Span::styled("\u{E0B2}", Style::default().fg(hint_bg)));
-        sys_spans.push(Span::styled(hint_text.clone(), Style::default().fg(Color::Black).add_modifier(Modifier::BOLD).bg(hint_bg)));
+        sys_spans.push(Span::styled(hint_text.clone(), Style::default().fg(Color::White).add_modifier(Modifier::BOLD).bg(hint_bg)));
         fixed += 1;
-        fixed += hint_text.len();
+        fixed += hint_text.chars().count();
     }
 
     spans.append(&mut sys_spans);
 
-    let closing_width = 3;
+    let closing_width = if bg_active { 5 } else { 3 };
     let gradient_width = (area.width as usize).saturating_sub(fixed + closing_width);
 
     spans.push(Span::styled(" ".repeat(gradient_width), Style::default()));
+    if bg_active {
+        spans.push(Span::styled("\u{2699} ", Style::default().fg(crate::palette::ERROR).bg(corner_color)));
+    }
     spans.push(Span::styled("\u{E0B0}", Style::default().fg(corner_color)));
     spans.push(Span::styled("──", Style::default()));
 
@@ -370,29 +400,6 @@ fn render_menu(f: &mut Frame, area: Rect, menu: &MenuState) {
     f.render_widget(Paragraph::new(text), items_area);
 }
 
-fn cell_to_span(cell: &vt100::Cell) -> Span<'_> {
-    let mut modifiers = Modifier::empty();
-
-    for (enabled, modifier) in [
-        (cell.bold(), Modifier::BOLD),
-        (cell.dim(), Modifier::DIM),
-        (cell.italic(), Modifier::ITALIC),
-        (cell.underline(), Modifier::UNDERLINED),
-        (cell.inverse(), Modifier::REVERSED),
-    ] {
-        if enabled {
-            modifiers.insert(modifier);
-        }
-    }
-
-    let style = Style::default()
-        .fg(to_ratatui_color(cell.fgcolor()))
-        .bg(to_ratatui_color(cell.bgcolor()))
-        .add_modifier(modifiers);
-
-    Span::styled(cell.contents().to_owned(), style)
-}
-
 fn to_ratatui_color(c: vt100::Color) -> Color {
     match c {
         vt100::Color::Default => Color::Reset,
@@ -405,7 +412,7 @@ fn to_ratatui_color(c: vt100::Color) -> Color {
 ///
 /// Returns `None` if the key cannot be represented (e.g. unsupported modifier
 /// combinations).
-pub fn key_to_bytes(key: &KeyEvent) -> Option<Vec<u8>> {
+pub fn key_to_bytes(key: &KeyEvent, app_cursor: bool) -> Option<Vec<u8>> {
     match key.code {
         KeyCode::Char(c) => {
             if key.modifiers.contains(KeyModifiers::CONTROL) {
@@ -426,12 +433,12 @@ pub fn key_to_bytes(key: &KeyEvent) -> Option<Vec<u8>> {
         KeyCode::Backspace => Some(vec![0x7f]),
         KeyCode::Tab => Some(vec![b'\t']),
         KeyCode::Esc => Some(vec![0x1b]),
-        KeyCode::Up => Some(b"\x1b[A".to_vec()),
-        KeyCode::Down => Some(b"\x1b[B".to_vec()),
-        KeyCode::Right => Some(b"\x1b[C".to_vec()),
-        KeyCode::Left => Some(b"\x1b[D".to_vec()),
-        KeyCode::Home => Some(b"\x1b[H".to_vec()),
-        KeyCode::End => Some(b"\x1b[F".to_vec()),
+        KeyCode::Up => if app_cursor { Some(b"\x1bOA".to_vec()) } else { Some(b"\x1b[A".to_vec()) },
+        KeyCode::Down => if app_cursor { Some(b"\x1bOB".to_vec()) } else { Some(b"\x1b[B".to_vec()) },
+        KeyCode::Right => if app_cursor { Some(b"\x1bOC".to_vec()) } else { Some(b"\x1b[C".to_vec()) },
+        KeyCode::Left => if app_cursor { Some(b"\x1bOD".to_vec()) } else { Some(b"\x1b[D".to_vec()) },
+        KeyCode::Home => if app_cursor { Some(b"\x1bOH".to_vec()) } else { Some(b"\x1b[H".to_vec()) },
+        KeyCode::End => if app_cursor { Some(b"\x1bOF".to_vec()) } else { Some(b"\x1b[F".to_vec()) },
         KeyCode::PageUp => Some(b"\x1b[5~".to_vec()),
         KeyCode::PageDown => Some(b"\x1b[6~".to_vec()),
         KeyCode::Delete => Some(b"\x1b[3~".to_vec()),

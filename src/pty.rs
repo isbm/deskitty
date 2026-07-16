@@ -84,4 +84,9 @@ impl Pty {
     pub fn kill(&mut self) -> io::Result<()> {
         self.child.kill()
     }
+
+    /// The child process PID, if available.
+    pub fn process_id(&self) -> Option<u32> {
+        self.child.process_id()
+    }
 }
