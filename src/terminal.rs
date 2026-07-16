@@ -10,10 +10,21 @@
 pub struct Terminal {
     parser: vt100::Parser,
     responses: Vec<Vec<u8>>,
-    dec_special_graphics: bool,
-    pending_escape: bool,
-    pending_charset_select: bool,
+    g0_dec_special_graphics: bool,
+    g1_dec_special_graphics: bool,
+    using_g1_charset: bool,
+    escape_state: EscapeState,
     application_cursor_keys: bool,
+}
+
+#[derive(Clone, Copy)]
+enum EscapeState {
+    Ground,
+    Escape,
+    CharsetSelect(u8),
+    Csi,
+    String,
+    StringEscape,
 }
 
 impl Terminal {
@@ -22,9 +33,10 @@ impl Terminal {
         Self {
             parser: vt100::Parser::new(rows, cols, 0),
             responses: Vec::new(),
-            dec_special_graphics: false,
-            pending_escape: false,
-            pending_charset_select: false,
+            g0_dec_special_graphics: false,
+            g1_dec_special_graphics: false,
+            using_g1_charset: false,
+            escape_state: EscapeState::Ground,
             application_cursor_keys: false,
         }
     }
@@ -77,37 +89,86 @@ impl Terminal {
         self.parser.screen().size()
     }
 
+    fn active_dec_special_graphics(&self) -> bool {
+        if self.using_g1_charset {
+            self.g1_dec_special_graphics
+        } else {
+            self.g0_dec_special_graphics
+        }
+    }
+
     fn translate_dec_special_graphics(&mut self, bytes: &[u8]) -> Vec<u8> {
         let mut translated = Vec::with_capacity(bytes.len());
 
         for &byte in bytes {
-            if self.pending_charset_select {
-                self.pending_charset_select = false;
-                self.pending_escape = false;
-                self.dec_special_graphics = byte == b'0';
-                continue;
-            }
-
-            if self.pending_escape {
-                self.pending_escape = false;
-                if byte == b'(' {
-                    self.pending_charset_select = true;
-                    continue;
+            match self.escape_state {
+                EscapeState::Ground => match byte {
+                    0x1b => {
+                        self.escape_state = EscapeState::Escape;
+                    }
+                    0x0e => {
+                        self.using_g1_charset = true;
+                    }
+                    0x0f => {
+                        self.using_g1_charset = false;
+                    }
+                    0x20..=0x7e if self.active_dec_special_graphics() => {
+                        push_dec_special_graphic(&mut translated, byte);
+                    }
+                    _ => {
+                        translated.push(byte);
+                    }
+                },
+                EscapeState::Escape => match byte {
+                    b'(' | b')' => {
+                        self.escape_state = EscapeState::CharsetSelect(byte);
+                    }
+                    b'[' => {
+                        self.escape_state = EscapeState::Csi;
+                        translated.push(0x1b);
+                        translated.push(byte);
+                    }
+                    b']' | b'P' | b'^' | b'_' => {
+                        self.escape_state = EscapeState::String;
+                        translated.push(0x1b);
+                        translated.push(byte);
+                    }
+                    _ => {
+                        self.escape_state = EscapeState::Ground;
+                        translated.push(0x1b);
+                        translated.push(byte);
+                    }
+                },
+                EscapeState::CharsetSelect(charset) => {
+                    match charset {
+                        b'(' => self.g0_dec_special_graphics = byte == b'0',
+                        b')' => self.g1_dec_special_graphics = byte == b'0',
+                        _ => {}
+                    }
+                    self.escape_state = EscapeState::Ground;
                 }
-                translated.push(0x1b);
-                translated.push(byte);
-                continue;
-            }
-
-            if byte == 0x1b {
-                self.pending_escape = true;
-                continue;
-            }
-
-            if self.dec_special_graphics {
-                push_dec_special_graphic(&mut translated, byte);
-            } else {
-                translated.push(byte);
+                EscapeState::Csi => {
+                    translated.push(byte);
+                    if (0x40..=0x7e).contains(&byte) {
+                        self.escape_state = EscapeState::Ground;
+                    }
+                }
+                EscapeState::String => {
+                    translated.push(byte);
+                    match byte {
+                        0x07 => self.escape_state = EscapeState::Ground,
+                        0x1b => self.escape_state = EscapeState::StringEscape,
+                        _ => {}
+                    }
+                }
+                EscapeState::StringEscape => {
+                    translated.push(byte);
+                    self.escape_state = if byte == b'\\' {
+                        EscapeState::Ground
+                    } else {
+                        EscapeState::String
+                    };
+                }
             }
         }
 
@@ -167,4 +228,53 @@ fn push_dec_special_graphic(out: &mut Vec<u8>, byte: u8) {
 
     let mut buf = [0u8; 4];
     out.extend_from_slice(mapped.encode_utf8(&mut buf).as_bytes());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Terminal;
+
+    #[test]
+    fn translates_g0_dec_vertical_line() {
+        let mut terminal = Terminal::new(1, 3);
+
+        terminal.process(b"A\x1b(0x\x1b(BB");
+
+        assert_eq!(terminal.screen().cell(0, 0).unwrap().contents(), "A");
+        assert_eq!(terminal.screen().cell(0, 1).unwrap().contents(), "│");
+        assert_eq!(terminal.screen().cell(0, 2).unwrap().contents(), "B");
+    }
+
+    #[test]
+    fn translates_g1_dec_vertical_line() {
+        let mut terminal = Terminal::new(1, 3);
+
+        terminal.process(b"A\x1b)0\x0ex\x0fB");
+
+        assert_eq!(terminal.screen().cell(0, 0).unwrap().contents(), "A");
+        assert_eq!(terminal.screen().cell(0, 1).unwrap().contents(), "│");
+        assert_eq!(terminal.screen().cell(0, 2).unwrap().contents(), "B");
+    }
+
+    #[test]
+    fn preserves_utf8_vertical_line() {
+        let mut terminal = Terminal::new(1, 3);
+
+        terminal.process("A│B".as_bytes());
+
+        assert_eq!(terminal.screen().cell(0, 0).unwrap().contents(), "A");
+        assert_eq!(terminal.screen().cell(0, 1).unwrap().contents(), "│");
+        assert_eq!(terminal.screen().cell(0, 2).unwrap().contents(), "B");
+    }
+
+    #[test]
+    fn does_not_translate_csi_while_dec_graphics_is_active() {
+        let mut terminal = Terminal::new(1, 2);
+
+        terminal.process(b"\x1b(0\x1b[31mx");
+
+        let cell = terminal.screen().cell(0, 0).unwrap();
+        assert_eq!(cell.contents(), "│");
+        assert_eq!(cell.fgcolor(), vt100::Color::Idx(1));
+    }
 }

@@ -205,31 +205,58 @@ fn render_terminal_grid(f: &mut Frame, area: Rect, screen: &vt100::Screen) {
     let (rows, cols) = screen.size();
     let max_rows = area.height.min(rows);
     let max_cols = area.width.min(cols);
+    let buf = f.buffer_mut();
 
-    let mut lines = Vec::new();
     for row in 0..max_rows {
-        let mut spans: Vec<Span> = Vec::new();
-        let mut col_offset: u16 = 0;
-        while col_offset < max_cols {
-            if let Some(cell) = screen.cell(row, col_offset) {
+        let mut col: u16 = 0;
+        while col < max_cols {
+            let x = area.x + col;
+            let y = area.y + row;
+
+            if let Some(cell) = screen.cell(row, col) {
                 if cell.is_wide_continuation() {
-                    col_offset += 1;
+                    col += 1;
                     continue;
                 }
-                let span = cell_to_span(cell);
-                let width = if cell.is_wide() { 2 } else { 1 };
-                spans.push(span);
-                col_offset += width;
+
+                let mut style = Style::default()
+                    .fg(to_ratatui_color(cell.fgcolor()))
+                    .bg(to_ratatui_color(cell.bgcolor()));
+
+                if cell.bold()      { style = style.add_modifier(Modifier::BOLD); }
+                if cell.dim()       { style = style.add_modifier(Modifier::DIM); }
+                if cell.italic()    { style = style.add_modifier(Modifier::ITALIC); }
+                if cell.underline() { style = style.add_modifier(Modifier::UNDERLINED); }
+                if cell.inverse()   { style = style.add_modifier(Modifier::REVERSED); }
+
+                let ch = cell.contents();
+                let display = if ch.is_empty() { " " } else { ch };
+
+                if let Some(c) = buf.cell_mut((x, y)) {
+                    c.set_symbol(display);
+                    c.set_style(style);
+                }
+
+                if cell.is_wide() {
+                    if col + 1 < max_cols
+                        && let Some(c) = buf.cell_mut((x + 1, y))
+                    {
+                        c.set_symbol(" ");
+                        c.set_style(style);
+                    }
+                    col += 2;
+                } else {
+                    col += 1;
+                }
             } else {
-                spans.push(Span::raw(" "));
-                col_offset += 1;
+                if let Some(c) = buf.cell_mut((x, y)) {
+                    c.set_symbol(" ");
+                    c.set_style(Style::default());
+                }
+                col += 1;
             }
         }
-        lines.push(Line::from(spans));
     }
-
-    let text = Text::from(lines);
-    f.render_widget(Paragraph::new(text), area);
 
     let (cursor_row, cursor_col) = screen.cursor_position();
     if cursor_row < max_rows && cursor_col < max_cols {
@@ -371,36 +398,6 @@ fn render_menu(f: &mut Frame, area: Rect, menu: &MenuState) {
     let text = Text::from(lines);
     let items_area = Rect::new(inner_area.x, items_start_y, inner_area.width, menu.items.len() as u16);
     f.render_widget(Paragraph::new(text), items_area);
-}
-
-fn cell_to_span(cell: &vt100::Cell) -> Span<'_> {
-    let contents = cell.contents();
-    if contents.is_empty() {
-        return Span::styled(" ", Style::default()
-            .fg(to_ratatui_color(cell.fgcolor()))
-            .bg(to_ratatui_color(cell.bgcolor())));
-    }
-
-    let mut modifiers = Modifier::empty();
-
-    for (enabled, modifier) in [
-        (cell.bold(), Modifier::BOLD),
-        (cell.dim(), Modifier::DIM),
-        (cell.italic(), Modifier::ITALIC),
-        (cell.underline(), Modifier::UNDERLINED),
-        (cell.inverse(), Modifier::REVERSED),
-    ] {
-        if enabled {
-            modifiers.insert(modifier);
-        }
-    }
-
-    let style = Style::default()
-        .fg(to_ratatui_color(cell.fgcolor()))
-        .bg(to_ratatui_color(cell.bgcolor()))
-        .add_modifier(modifiers);
-
-    Span::styled(cell.contents().to_owned(), style)
 }
 
 fn to_ratatui_color(c: vt100::Color) -> Color {
