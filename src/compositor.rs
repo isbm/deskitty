@@ -251,7 +251,7 @@ fn render_status_bar(f: &mut Frame, area: Rect, _labels: &[(char, String)], _act
 
     let hint_text = match mode {
         Mode::Normal => " Ctrl+\\ Menu ".to_string(),
-        Mode::Command(_) => " Esc=Close ".to_string(),
+        Mode::Command(_) => " ESC Close ".to_string(),
     };
 
     let mut sys_spans: Vec<Span<'static>> = Vec::new();
@@ -268,7 +268,7 @@ fn render_status_bar(f: &mut Frame, area: Rect, _labels: &[(char, String)], _act
         sys_spans.push(Span::styled("\u{E0B2}", Style::default().fg(arch_bg).bg(mem_bg)));
         sys_spans.push(Span::styled(arch_text.clone(), white.bg(arch_bg)));
         sys_spans.push(Span::styled("\u{E0B2}", Style::default().fg(hint_bg).bg(arch_bg)));
-        sys_spans.push(Span::styled(hint_text.clone(), Style::default().fg(Color::Black).add_modifier(Modifier::BOLD).bg(hint_bg)));
+        sys_spans.push(Span::styled(hint_text.clone(), Style::default().fg(Color::White).add_modifier(Modifier::BOLD).bg(hint_bg)));
 
         fixed += 4;
         fixed += load_text.chars().count();
@@ -277,7 +277,7 @@ fn render_status_bar(f: &mut Frame, area: Rect, _labels: &[(char, String)], _act
         fixed += hint_text.chars().count();
     } else {
         sys_spans.push(Span::styled("\u{E0B2}", Style::default().fg(hint_bg)));
-        sys_spans.push(Span::styled(hint_text.clone(), Style::default().fg(Color::Black).add_modifier(Modifier::BOLD).bg(hint_bg)));
+        sys_spans.push(Span::styled(hint_text.clone(), Style::default().fg(Color::White).add_modifier(Modifier::BOLD).bg(hint_bg)));
         fixed += 1;
         fixed += hint_text.chars().count();
     }
@@ -289,7 +289,7 @@ fn render_status_bar(f: &mut Frame, area: Rect, _labels: &[(char, String)], _act
 
     spans.push(Span::styled(" ".repeat(gradient_width), Style::default()));
     if bg_active {
-        spans.push(Span::styled("\u{F013} ", Style::default().fg(crate::palette::ERROR).bg(corner_color)));
+        spans.push(Span::styled("\u{2699} ", Style::default().fg(crate::palette::ERROR).bg(corner_color)));
     }
     spans.push(Span::styled("\u{E0B0}", Style::default().fg(corner_color)));
     spans.push(Span::styled("──", Style::default()));
