@@ -13,6 +13,7 @@ pub struct Terminal {
     dec_special_graphics: bool,
     pending_escape: bool,
     pending_charset_select: bool,
+    application_cursor_keys: bool,
 }
 
 impl Terminal {
@@ -24,6 +25,7 @@ impl Terminal {
             dec_special_graphics: false,
             pending_escape: false,
             pending_charset_select: false,
+            application_cursor_keys: false,
         }
     }
 
@@ -34,6 +36,7 @@ impl Terminal {
     pub fn process(&mut self, bytes: &[u8]) {
         if bytes.contains(&0x1b) {
             self.handle_queries(bytes);
+            self.handle_cursor_mode(bytes);
         }
         let translated = self.translate_dec_special_graphics(bytes);
         self.parser.process(&translated);
@@ -43,6 +46,19 @@ impl Terminal {
     /// reports, etc.) and clear the queue.
     pub fn drain_responses(&mut self) -> Vec<Vec<u8>> {
         std::mem::take(&mut self.responses)
+    }
+
+    pub fn application_cursor_keys(&self) -> bool {
+        self.application_cursor_keys
+    }
+
+    fn handle_cursor_mode(&mut self, bytes: &[u8]) {
+        if bytes.windows(5).any(|w| w == b"\x1b[?1h") {
+            self.application_cursor_keys = true;
+        }
+        if bytes.windows(5).any(|w| w == b"\x1b[?1l") {
+            self.application_cursor_keys = false;
+        }
     }
 
     /// Resize the terminal grid after a window resize.

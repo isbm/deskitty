@@ -415,7 +415,7 @@ fn to_ratatui_color(c: vt100::Color) -> Color {
 ///
 /// Returns `None` if the key cannot be represented (e.g. unsupported modifier
 /// combinations).
-pub fn key_to_bytes(key: &KeyEvent) -> Option<Vec<u8>> {
+pub fn key_to_bytes(key: &KeyEvent, app_cursor: bool) -> Option<Vec<u8>> {
     match key.code {
         KeyCode::Char(c) => {
             if key.modifiers.contains(KeyModifiers::CONTROL) {
@@ -436,12 +436,12 @@ pub fn key_to_bytes(key: &KeyEvent) -> Option<Vec<u8>> {
         KeyCode::Backspace => Some(vec![0x7f]),
         KeyCode::Tab => Some(vec![b'\t']),
         KeyCode::Esc => Some(vec![0x1b]),
-        KeyCode::Up => Some(b"\x1b[A".to_vec()),
-        KeyCode::Down => Some(b"\x1b[B".to_vec()),
-        KeyCode::Right => Some(b"\x1b[C".to_vec()),
-        KeyCode::Left => Some(b"\x1b[D".to_vec()),
-        KeyCode::Home => Some(b"\x1b[H".to_vec()),
-        KeyCode::End => Some(b"\x1b[F".to_vec()),
+        KeyCode::Up => if app_cursor { Some(b"\x1bOA".to_vec()) } else { Some(b"\x1b[A".to_vec()) },
+        KeyCode::Down => if app_cursor { Some(b"\x1bOB".to_vec()) } else { Some(b"\x1b[B".to_vec()) },
+        KeyCode::Right => if app_cursor { Some(b"\x1bOC".to_vec()) } else { Some(b"\x1b[C".to_vec()) },
+        KeyCode::Left => if app_cursor { Some(b"\x1bOD".to_vec()) } else { Some(b"\x1b[D".to_vec()) },
+        KeyCode::Home => if app_cursor { Some(b"\x1bOH".to_vec()) } else { Some(b"\x1b[H".to_vec()) },
+        KeyCode::End => if app_cursor { Some(b"\x1bOF".to_vec()) } else { Some(b"\x1b[F".to_vec()) },
         KeyCode::PageUp => Some(b"\x1b[5~".to_vec()),
         KeyCode::PageDown => Some(b"\x1b[6~".to_vec()),
         KeyCode::Delete => Some(b"\x1b[3~".to_vec()),

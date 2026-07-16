@@ -88,7 +88,7 @@ fn run() -> Result<(), String> {
                                 let menu = MenuState::new(&ws.labels());
                                 mode = Mode::Command(menu);
                                 dirty = true;
-                            } else if let Some(bytes) = compositor::key_to_bytes(&key)
+                            } else if let Some(bytes) = compositor::key_to_bytes(&key, ws.active_tab().terminal.application_cursor_keys())
                                 && let Some(ref mut pty) = ws.active_tab_mut().pty
                             {
                                 pty.write(&bytes).map_err(|e| e.to_string())?;
