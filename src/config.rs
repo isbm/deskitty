@@ -13,6 +13,16 @@ pub struct Config {
     /// Screen-triggered automation events.
     #[serde(default)]
     pub events: EventsConfig,
+    /// Scan/debug mode: evaluate and log events without sending keystrokes.
+    #[serde(default)]
+    pub debug: bool,
+    /// Show the colored frame and status bar.
+    #[serde(default = "default_show_desktop")]
+    pub show_desktop: bool,
+}
+
+fn default_show_desktop() -> bool {
+    true
 }
 
 /// A single tab definition from the YAML config.
@@ -99,5 +109,7 @@ fn default_config() -> Config {
     Config {
         tabs: vec![TabConfig { name: "Shell".to_string(), shortcut: 's', command: vec!["bash".to_string()], cwd: None, default: true }],
         events: EventsConfig::default(),
+        debug: false,
+        show_desktop: true,
     }
 }

@@ -5,21 +5,26 @@ mod events;
 mod palette;
 mod proc;
 mod pty;
+mod scan;
 mod sounds;
 mod sysinfo;
 mod terminal;
 mod workspace;
 
 #[cfg(test)]
+mod compositor_ut;
+#[cfg(test)]
 mod config_ut;
 #[cfg(test)]
 mod events_ut;
+#[cfg(test)]
+mod scan_ut;
 #[cfg(test)]
 mod sounds_ut;
 #[cfg(test)]
 mod terminal_ut;
 
-use compositor::{MenuState, Mode};
+use compositor::{MenuOptions, MenuState, Mode};
 use crossterm::ExecutableCommand;
 use crossterm::event::{Event, KeyCode, KeyModifiers};
 use ratatui::backend::CrosstermBackend;
@@ -55,11 +60,12 @@ fn run() -> Result<(), String> {
     let mut term = ratatui::Terminal::new(backend).map_err(|e| e.to_string())?;
 
     let size = term.size().map_err(|e| e.to_string())?;
-    let mut grid_rows = size.height.saturating_sub(3);
-    let mut grid_cols = size.width.saturating_sub(2);
+    let mut actions_stopped = false;
+    let mut show_desktop = cfg.show_desktop;
+    let (mut grid_rows, mut grid_cols) = grid_dimensions(size.width, size.height, show_desktop);
 
     let mut ws = workspace::Workspace::spawn_all(&cfg.tabs, grid_rows, grid_cols).map_err(|e| e.to_string())?;
-
+    let mut scan = scan::ScanState::default();
     let mut mode = Mode::Normal;
     let mut dirty = true;
     let mut prev_bg_active = false;
@@ -91,9 +97,20 @@ fn run() -> Result<(), String> {
                 dirty = true;
             }
 
-            let action_mode = workspace::ActionMode::Active;
-            if matches!(&mode, Mode::Normal) {
-                ws.apply_events(&cfg.events.on_text, action_mode).map_err(|e| e.to_string())?;
+            let action_mode = if cfg.debug {
+                workspace::ActionMode::Debug
+            } else if actions_stopped {
+                workspace::ActionMode::Paused
+            } else {
+                workspace::ActionMode::Active
+            };
+            let run = if matches!(&mode, Mode::Normal) {
+                ws.apply_events(&cfg.events.on_text, action_mode).map_err(|e| e.to_string())?
+            } else {
+                events::EventRun::default()
+            };
+            if cfg.debug && scan.update(&cfg.events.on_text, ws.active_tab().terminal.screen(), &run) {
+                dirty = true;
             }
             ws.tick_actions(Instant::now(), action_mode != workspace::ActionMode::Active).map_err(|e| e.to_string())?;
 
@@ -102,7 +119,8 @@ fn run() -> Result<(), String> {
                     Event::Key(key) => match &mut mode {
                         Mode::Normal => {
                             if key.code == KeyCode::Char('4') && key.modifiers.contains(KeyModifiers::CONTROL) {
-                                let menu = MenuState::new(&ws.labels());
+                                let options = MenuOptions { actions_stopped, show_desktop, actions_enabled: !cfg.debug };
+                                let menu = MenuState::new(&ws.labels(), options);
                                 mode = Mode::Command(menu);
                                 dirty = true;
                             } else if let Some(bytes) = compositor::key_to_bytes(&key, ws.active_tab().terminal.application_cursor_keys())
@@ -138,6 +156,25 @@ fn run() -> Result<(), String> {
                                     mode = Mode::Normal;
                                     dirty = true;
                                 }
+                                compositor::MenuItem::ToggleActions { enabled: false, .. } => {}
+                                compositor::MenuItem::ToggleActions { .. } => {
+                                    actions_stopped = !actions_stopped;
+                                    if actions_stopped {
+                                        ws.clear_pending_actions();
+                                    }
+                                    mode = Mode::Normal;
+                                    dirty = true;
+                                }
+                                compositor::MenuItem::ToggleDesktop { .. } => {
+                                    show_desktop = !show_desktop;
+                                    let size = term.size().map_err(|e| e.to_string())?;
+                                    let (rows, cols) = grid_dimensions(size.width, size.height, show_desktop);
+                                    grid_rows = rows;
+                                    grid_cols = cols;
+                                    ws.resize_all(grid_rows, grid_cols).map_err(|e| e.to_string())?;
+                                    mode = Mode::Normal;
+                                    dirty = true;
+                                }
                                 compositor::MenuItem::Quit => {
                                     break 'main Ok(());
                                 }
@@ -153,6 +190,25 @@ fn run() -> Result<(), String> {
                                             mode = Mode::Normal;
                                             dirty = true;
                                         }
+                                        compositor::MenuItem::ToggleActions { enabled: false, .. } => {}
+                                        compositor::MenuItem::ToggleActions { .. } => {
+                                            actions_stopped = !actions_stopped;
+                                            if actions_stopped {
+                                                ws.clear_pending_actions();
+                                            }
+                                            mode = Mode::Normal;
+                                            dirty = true;
+                                        }
+                                        compositor::MenuItem::ToggleDesktop { .. } => {
+                                            show_desktop = !show_desktop;
+                                            let size = term.size().map_err(|e| e.to_string())?;
+                                            let (rows, cols) = grid_dimensions(size.width, size.height, show_desktop);
+                                            grid_rows = rows;
+                                            grid_cols = cols;
+                                            ws.resize_all(grid_rows, grid_cols).map_err(|e| e.to_string())?;
+                                            mode = Mode::Normal;
+                                            dirty = true;
+                                        }
                                         compositor::MenuItem::Quit => {
                                             break 'main Ok(());
                                         }
@@ -163,8 +219,9 @@ fn run() -> Result<(), String> {
                         },
                     },
                     Event::Resize(cols, rows) => {
-                        grid_rows = rows.saturating_sub(3);
-                        grid_cols = cols.saturating_sub(2);
+                        let (new_rows, new_cols) = grid_dimensions(cols, rows, show_desktop);
+                        grid_rows = new_rows;
+                        grid_cols = new_cols;
                         ws.resize_all(grid_rows, grid_cols).map_err(|e| e.to_string())?;
                         term.resize(Rect::new(0, 0, cols, rows)).map_err(|e| e.to_string())?;
                         dirty = true;
@@ -182,7 +239,17 @@ fn run() -> Result<(), String> {
             if dirty {
                 let info = sysinfo::gather();
                 term.draw(|f| {
-                    compositor::render(f, ws.active_tab().terminal.screen(), &ws.labels(), ws.active_idx(), &mode, info.as_ref(), bg_active);
+                    compositor::render(
+                        f,
+                        ws.active_tab().terminal.screen(),
+                        &ws.labels(),
+                        ws.active_idx(),
+                        &mode,
+                        info.as_ref(),
+                        bg_active,
+                        show_desktop,
+                        &scan,
+                    );
                 })
                 .map_err(|e| e.to_string())?;
                 dirty = false;
@@ -196,4 +263,12 @@ fn run() -> Result<(), String> {
     drop(ws);
 
     result
+}
+
+fn grid_dimensions(width: u16, height: u16, show_desktop: bool) -> (u16, u16) {
+    if show_desktop {
+        (height.saturating_sub(3), width.saturating_sub(2))
+    } else {
+        (height, width)
+    }
 }

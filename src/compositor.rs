@@ -4,19 +4,42 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::{Alignment, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, Borders, Paragraph, Widget};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph, Widget};
 use ratatui_glamour::color::{blend_1d, blend_2d, lerp_color};
 use ratatui_glamour::rule::dashed_title;
 use ratatui_glamour::surface::gradient_rounded_panel_lines;
 
+use crate::scan::ScanState;
 use crate::sysinfo::SysInfo;
 
 /// An entry in the command-mode popup menu.
 pub enum MenuItem {
     /// Switch to a tab.
     Tab { idx: usize, shortcut: char, name: String },
+    /// Pause or resume automatic event keystrokes.
+    ToggleActions { stopped: bool, enabled: bool },
+    /// Hide or show the colored frame and status bar.
+    ToggleDesktop { visible: bool },
     /// Quit deskitty entirely.
     Quit,
+}
+
+impl MenuItem {
+    /// Whether the item can be focused and activated.
+    pub fn selectable(&self) -> bool {
+        !matches!(self, Self::ToggleActions { enabled: false, .. })
+    }
+}
+
+/// State used to build the command menu.
+#[derive(Debug, Clone, Copy)]
+pub struct MenuOptions {
+    /// Whether automatic event keystrokes are paused.
+    pub actions_stopped: bool,
+    /// Whether the colored frame and status bar are visible.
+    pub show_desktop: bool,
+    /// Whether the actions toggle can be used (false in debug mode).
+    pub actions_enabled: bool,
 }
 
 /// The command-mode popup menu state.
@@ -26,34 +49,48 @@ pub struct MenuState {
 }
 
 impl MenuState {
-    /// Build a menu from tab labels. A `Quit` entry is always appended.
-    pub fn new(labels: &[(char, String)]) -> Self {
+    /// Build a menu from tab labels, followed by the available toggles and a
+    /// `Quit` entry.
+    pub fn new(labels: &[(char, String)], options: MenuOptions) -> Self {
         let mut items: Vec<MenuItem> =
             labels.iter().enumerate().map(|(idx, (shortcut, name))| MenuItem::Tab { idx, shortcut: *shortcut, name: name.clone() }).collect();
+        items.push(MenuItem::ToggleActions { stopped: options.actions_stopped, enabled: options.actions_enabled });
+        items.push(MenuItem::ToggleDesktop { visible: options.show_desktop });
         items.push(MenuItem::Quit);
-        Self { items, selected: 0 }
+        let selected = items.iter().position(MenuItem::selectable).unwrap_or(0);
+        Self { items, selected }
     }
 
-    /// Move selection one item down (wrapping).
+    /// Move selection to the next selectable item (wrapping).
     pub fn next(&mut self) {
-        self.selected = (self.selected + 1) % self.items.len();
+        for offset in 1..=self.items.len() {
+            let idx = (self.selected + offset) % self.items.len();
+            if self.items[idx].selectable() {
+                self.selected = idx;
+                return;
+            }
+        }
     }
 
-    /// Move selection one item up (wrapping).
+    /// Move selection to the previous selectable item (wrapping).
     pub fn prev(&mut self) {
-        if self.selected == 0 {
-            self.selected = self.items.len() - 1;
-        } else {
-            self.selected -= 1;
+        for offset in 1..=self.items.len() {
+            let idx = (self.selected + self.items.len() - offset) % self.items.len();
+            if self.items[idx].selectable() {
+                self.selected = idx;
+                return;
+            }
         }
     }
 
     /// Find the index of the item matching the given shortcut character.
     ///
-    /// Returns `None` if no item matches.
+    /// Returns `None` if no item matches or the matching item is disabled.
     pub fn find_by_shortcut(&self, c: char) -> Option<usize> {
         self.items.iter().position(|item| match item {
             MenuItem::Tab { shortcut, .. } => *shortcut == c,
+            MenuItem::ToggleActions { enabled, .. } => *enabled && c == 'a',
+            MenuItem::ToggleDesktop { .. } => c == 'd',
             MenuItem::Quit => c == 'q',
         })
     }
@@ -181,24 +218,80 @@ fn bottom_right_corner_color(area: Rect, stops: &[Color]) -> Color {
 }
 
 /// Render the full frame: terminal grid, status bar, and optional command menu.
-pub fn render(f: &mut Frame, screen: &vt100::Screen, labels: &[(char, String)], active_idx: usize, mode: &Mode, sysinfo: Option<&SysInfo>, bg_active: bool) {
+#[allow(clippy::too_many_arguments)]
+pub fn render(
+    f: &mut Frame, screen: &vt100::Screen, labels: &[(char, String)], active_idx: usize, mode: &Mode, sysinfo: Option<&SysInfo>, bg_active: bool,
+    show_desktop: bool, scan: &ScanState,
+) {
     let area = f.area();
 
-    let border_stops =
-        vec![Color::Rgb(255, 95, 135), Color::Rgb(135, 95, 255), Color::Rgb(0, 255, 255), Color::Rgb(135, 95, 255), Color::Rgb(255, 95, 135)];
-    let corner_color = bottom_right_corner_color(area, &border_stops);
-    f.render_widget(&GradientPanel { stops: border_stops }, area);
+    if show_desktop {
+        let border_stops =
+            vec![Color::Rgb(255, 95, 135), Color::Rgb(135, 95, 255), Color::Rgb(0, 255, 255), Color::Rgb(135, 95, 255), Color::Rgb(255, 95, 135)];
+        let corner_color = bottom_right_corner_color(area, &border_stops);
+        f.render_widget(&GradientPanel { stops: border_stops }, area);
 
-    let inner = Rect::new(area.x + 1, area.y + 1, area.width.saturating_sub(2), area.height.saturating_sub(2));
-    let grid_rect = Rect::new(inner.x, inner.y, inner.width, inner.height.saturating_sub(1));
-    let status_rect = Rect::new(area.x + 1, area.bottom() - 1, area.width.saturating_sub(2), 1);
+        let inner = Rect::new(area.x + 1, area.y + 1, area.width.saturating_sub(2), area.height.saturating_sub(2));
+        let grid_rect = Rect::new(inner.x, inner.y, inner.width, inner.height.saturating_sub(1));
+        let status_rect = Rect::new(area.x + 1, area.bottom() - 1, area.width.saturating_sub(2), 1);
 
-    render_terminal_grid(f, grid_rect, screen);
-    render_status_bar(f, status_rect, labels, active_idx, mode, sysinfo, corner_color, bg_active);
+        render_terminal_grid(f, grid_rect, screen);
+        render_status_bar(f, status_rect, labels, active_idx, mode, sysinfo, corner_color, bg_active);
+    } else {
+        render_terminal_grid(f, area, screen);
+    }
+
+    if scan.active() {
+        render_scan_overlay(f, area, scan);
+    }
 
     if let Mode::Command(menu) = mode {
         render_menu(f, area, menu);
     }
+}
+
+fn render_scan_overlay(f: &mut Frame, area: Rect, scan: &ScanState) {
+    let width = 50.min(area.width.saturating_sub(5));
+    let height = 5.min(area.height.saturating_sub(2));
+    if width < 10 || height < 2 {
+        return;
+    }
+
+    let x = area.x + area.width.saturating_sub(width + 4);
+    let y = area.y + 1;
+    let rect = Rect::new(x, y, width, height);
+    f.render_widget(Clear, rect);
+
+    let block = Block::default()
+        .borders(Borders::TOP)
+        .border_set(ratatui::symbols::border::ROUNDED)
+        .border_style(Style::default().fg(crate::palette::PRIMARY))
+        .title(Span::styled(format!(" {} ", scan.title()), Style::default().fg(crate::palette::PRIMARY).add_modifier(Modifier::BOLD)))
+        .style(Style::default().bg(crate::palette::BG_1));
+    let inner = block.inner(rect);
+    f.render_widget(block, rect);
+
+    let lines: Vec<_> = scan.lines().collect();
+    let start = lines.len().saturating_sub(inner.height as usize);
+    let lines: Vec<Line> = lines[start..]
+        .iter()
+        .map(|line| {
+            let mut spans = Vec::new();
+            if let Some((fg, bg)) = line.swatch {
+                spans.push(Span::styled("  ", Style::default().fg(to_ratatui_color(fg)).bg(to_ratatui_color(bg))));
+                spans.push(Span::raw(" "));
+            }
+            spans.push(Span::styled(line.text.clone(), Style::default().fg(crate::palette::FG)));
+            Line::from(spans)
+        })
+        .collect();
+
+    let text = if lines.is_empty() {
+        Text::from(Line::from(Span::styled("waiting...", Style::default().fg(crate::palette::GRAY_1))))
+    } else {
+        Text::from(lines)
+    };
+    f.render_widget(Paragraph::new(text).style(Style::default().bg(crate::palette::BG_1)), inner);
 }
 
 fn render_terminal_grid(f: &mut Frame, area: Rect, screen: &vt100::Screen) {
@@ -372,16 +465,33 @@ fn render_menu(f: &mut Frame, area: Rect, menu: &MenuState) {
     for (i, item) in menu.items.iter().enumerate() {
         let (label, hint) = match item {
             MenuItem::Tab { name, shortcut, .. } => (name.clone(), shortcut.to_uppercase().to_string()),
+            MenuItem::ToggleActions { stopped, enabled } => {
+                if *enabled {
+                    let label = if *stopped { "Resume actions" } else { "Stop actions" };
+                    (label.to_string(), "A".to_string())
+                } else {
+                    ("Actions paused".to_string(), "debug".to_string())
+                }
+            }
+            MenuItem::ToggleDesktop { visible } => {
+                let label = if *visible { "Hide desktop" } else { "Show desktop" };
+                (label.to_string(), "D".to_string())
+            }
             MenuItem::Quit => ("Quit".to_string(), "Q".to_string()),
         };
 
-        let selected = i == menu.selected;
-        let item_style = if selected {
+        let disabled = !item.selectable();
+        let selected = !disabled && i == menu.selected;
+        let item_style = if disabled {
+            Style::default().fg(crate::palette::GRAY_1)
+        } else if selected {
             Style::default().fg(crate::palette::BLACK).bg(crate::palette::HIGHLIGHT)
         } else {
             Style::default().fg(crate::palette::FG)
         };
-        let hint_style = if selected {
+        let hint_style = if disabled {
+            Style::default().fg(crate::palette::FAINT)
+        } else if selected {
             Style::default().fg(crate::palette::BG_0).bg(crate::palette::HIGHLIGHT)
         } else {
             Style::default().fg(crate::palette::PRIMARY)

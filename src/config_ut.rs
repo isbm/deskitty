@@ -51,3 +51,21 @@ fn leaves_other_paths_unchanged() {
         assert_eq!(expand_tilde(Path::new(path), Path::new("/home/user")), PathBuf::from(path));
     }
 }
+
+#[test]
+fn parses_debug_flag() {
+    let cfg = parse("debug: true\n");
+    assert!(cfg.debug);
+
+    let cfg = parse("tabs: []\n");
+    assert!(!cfg.debug);
+}
+
+#[test]
+fn show_desktop_defaults_true_and_parses_false() {
+    let cfg = parse("tabs: []\n");
+    assert!(cfg.show_desktop);
+
+    let cfg = parse("show_desktop: false\n");
+    assert!(!cfg.show_desktop);
+}
