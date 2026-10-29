@@ -6,7 +6,9 @@ use std::time::{Duration, Instant};
 use anyhow::Context;
 
 use crate::config::TabConfig;
-use crate::events::{EventAction, EventOutcome, EventRun, Keystroke, MatchGate, TextEvent, evaluate_events};
+use crate::events::{
+    DisappearEvent, DisappearGate, DisappearRun, EventAction, EventOutcome, EventRun, Keystroke, MatchGate, TextEvent, evaluate_events,
+};
 use crate::proc::ProcStat;
 use crate::pty;
 use crate::terminal;
@@ -51,6 +53,8 @@ pub struct Workspace {
     active: usize,
     /// Per-tab, per-event match gates.
     event_gates: Vec<Vec<MatchGate>>,
+    /// Per-tab, per-rule disappearance state.
+    disappear_gates: Vec<Vec<DisappearGate>>,
     /// Delayed keystroke actions waiting to be sent.
     pending_actions: VecDeque<PendingAction>,
 }
@@ -72,8 +76,9 @@ impl Workspace {
 
         let active = tab_configs.iter().position(|t| t.default).unwrap_or(0);
         let event_gates = (0..tabs.len()).map(|_| Vec::new()).collect();
+        let disappear_gates = (0..tabs.len()).map(|_| Vec::new()).collect();
 
-        Ok(Self { tabs, active, event_gates, pending_actions: VecDeque::new() })
+        Ok(Self { tabs, active, event_gates, disappear_gates, pending_actions: VecDeque::new() })
     }
 
     /// Index of the currently active tab.
@@ -178,6 +183,44 @@ impl Workspace {
         self.pending_actions.push_back(PendingAction { tab_idx, keys: action.keystroke.clone(), delay: action.delay, next_key: 0, next_at: now });
     }
 
+    /// Evaluate `on_disappear` rules for the active tab.
+    ///
+    /// The returned indices identify rules whose timeout expired this tick.
+    pub fn apply_disappear_events(&mut self, events: &[DisappearEvent], mode: ActionMode) -> io::Result<DisappearRun> {
+        if events.is_empty() {
+            return Ok(DisappearRun::default());
+        }
+        self.sync_disappear_gates(events.len());
+
+        let idx = self.active;
+        let tab = &self.tabs[idx];
+        if tab.pty.is_none() {
+            return Ok(DisappearRun::default());
+        }
+
+        let now = Instant::now();
+        let counts: Vec<usize> = events.iter().map(|event| event.match_count(tab.terminal.screen())).collect();
+        let mut fired = Vec::new();
+        for (event_idx, event) in events.iter().enumerate() {
+            if self.disappear_gates[idx][event_idx].update(counts[event_idx], now, event.timeout) {
+                let has_action = event.action.as_ref().is_some_and(|action| !action.keystroke.is_empty() || action.sound.is_some());
+                if has_action {
+                    fired.push(event_idx);
+                }
+            }
+        }
+
+        if mode == ActionMode::Active {
+            for &event_idx in &fired {
+                if let Some(action) = &events[event_idx].action {
+                    self.enqueue_action(idx, action, now);
+                }
+            }
+        }
+
+        Ok(DisappearRun { fired })
+    }
+
     fn sync_event_gates(&mut self, event_count: usize) {
         self.event_gates.resize_with(self.tabs.len(), Vec::new);
         for gates in &mut self.event_gates {
@@ -193,9 +236,28 @@ impl Workspace {
         }
     }
 
+    fn sync_disappear_gates(&mut self, event_count: usize) {
+        self.disappear_gates.resize_with(self.tabs.len(), Vec::new);
+        for gates in &mut self.disappear_gates {
+            gates.resize_with(event_count, DisappearGate::default);
+        }
+    }
+
+    fn reset_disappear_gates(&mut self, idx: usize) {
+        if let Some(gates) = self.disappear_gates.get_mut(idx) {
+            for gate in gates {
+                gate.reset();
+            }
+        }
+    }
+
     /// Switch to the tab at the given index. No-op if out of bounds.
+    ///
+    /// Disappearance state is reset for the newly active tab because its
+    /// screen was not observed while another tab was active.
     pub fn switch_to(&mut self, idx: usize) {
-        if idx < self.tabs.len() {
+        if idx < self.tabs.len() && idx != self.active {
+            self.reset_disappear_gates(idx);
             self.active = idx;
         }
     }
@@ -261,6 +323,7 @@ impl Workspace {
     pub fn close_tab(&mut self, idx: usize) {
         self.tabs[idx].pty = None;
         self.reset_event_gates(idx);
+        self.reset_disappear_gates(idx);
         self.pending_actions.retain(|action| action.tab_idx != idx);
     }
 
@@ -272,6 +335,7 @@ impl Workspace {
     /// Re-launch a previously closed tab in its original working directory.
     pub fn relaunch(&mut self, idx: usize, rows: u16, cols: u16) -> anyhow::Result<()> {
         self.reset_event_gates(idx);
+        self.reset_disappear_gates(idx);
         self.pending_actions.retain(|action| action.tab_idx != idx);
         let tab = &mut self.tabs[idx];
         let pty = pty::Pty::spawn(rows, cols, &tab.command, &tab.cwd).with_context(|| format!("relaunching tab '{}'", tab.name))?;

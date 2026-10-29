@@ -116,10 +116,12 @@ fn run() -> Result<(), String> {
             } else {
                 workspace::ActionMode::Active
             };
-            let run = if matches!(&mode, Mode::Normal) {
-                ws.apply_events(&cfg.events.on_text, action_mode).map_err(|e| e.to_string())?
+            let (run, disappear_run) = if matches!(&mode, Mode::Normal) {
+                let run = ws.apply_events(&cfg.events.on_text, action_mode).map_err(|e| e.to_string())?;
+                let disappear_run = ws.apply_disappear_events(&cfg.events.on_disappear, action_mode).map_err(|e| e.to_string())?;
+                (run, disappear_run)
             } else {
-                events::EventRun::default()
+                (events::EventRun::default(), events::DisappearRun::default())
             };
             if cfg.debug && scan.update(&cfg.events.on_text, ws.active_tab().terminal.screen(), &run) {
                 dirty = true;
@@ -128,6 +130,13 @@ fn run() -> Result<(), String> {
                 for outcome in &run.outcomes {
                     if let events::EventOutcome::Fired { event } = outcome
                         && let Some(action) = &cfg.events.on_text[*event].action
+                        && let Some(sound) = &action.sound
+                    {
+                        sounds.play(sound);
+                    }
+                }
+                for &event in &disappear_run.fired {
+                    if let Some(action) = &cfg.events.on_disappear[event].action
                         && let Some(sound) = &action.sound
                     {
                         sounds.play(sound);

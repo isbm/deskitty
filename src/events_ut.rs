@@ -1,4 +1,4 @@
-use crate::events::{ColorSpec, EventOutcome, EventsConfig, Keystroke, MatchGate, NamedColor, SETTLE, evaluate_events};
+use crate::events::{ColorSpec, DisappearGate, EventOutcome, EventsConfig, Keystroke, MatchGate, NamedColor, SETTLE, evaluate_events};
 use std::time::{Duration, Instant};
 
 const EVENT_YAML: &str = r#"
@@ -644,4 +644,87 @@ fn repeat_gate_cadence_over_time() {
         now += Duration::from_millis(16);
     }
     assert!((14..=16).contains(&fires), "unexpected fire count: {fires}");
+}
+
+#[test]
+fn parses_on_disappear_rule() {
+    let events: EventsConfig = serde_yaml::from_str(
+        r#"
+on_disappear:
+  - id: "agent-finished"
+    input:
+      content: "Thinking ..."
+    timeout: 10
+    action:
+      sound: tada
+"#,
+    )
+    .expect("valid event config");
+
+    assert_eq!(events.on_disappear.len(), 1);
+    assert_eq!(events.on_disappear[0].id.as_deref(), Some("agent-finished"));
+    assert_eq!(events.on_disappear[0].timeout, Duration::from_secs(10));
+    assert!(events.uses_sounds());
+    events.validate().expect("valid disappear rule");
+}
+
+#[test]
+fn rejects_invalid_disappear_timeout() {
+    for value in ["0", "-1", "0.0"] {
+        let yaml = format!(
+            r#"
+on_disappear:
+  input:
+    content: "Thinking ..."
+  timeout: {value}
+"#
+        );
+        assert!(serde_yaml::from_str::<EventsConfig>(&yaml).is_err(), "timeout {value} should fail");
+    }
+}
+
+#[test]
+fn rejects_repeat_on_disappear_action() {
+    let events: EventsConfig = serde_yaml::from_str(
+        r#"
+on_disappear:
+  input:
+    content: "Thinking ..."
+  timeout: 10
+  action:
+    sound: tada
+    repeat: 0.5
+"#,
+    )
+    .expect("valid yaml");
+
+    assert!(events.validate().is_err());
+}
+
+#[test]
+fn disappear_gate_fires_after_timeout_and_rearms() {
+    let mut gate = DisappearGate::default();
+    let timeout = Duration::from_secs(10);
+    let start = Instant::now();
+
+    assert!(!gate.update(1, start, timeout));
+    assert!(!gate.update(0, start + Duration::from_secs(1), timeout));
+    assert!(!gate.update(1, start + Duration::from_secs(5), timeout));
+    assert!(!gate.update(0, start + Duration::from_secs(6), timeout));
+    assert!(!gate.update(0, start + Duration::from_secs(15), timeout));
+    assert!(gate.update(0, start + Duration::from_secs(16), timeout));
+    assert!(!gate.update(0, start + Duration::from_secs(30), timeout));
+
+    assert!(!gate.update(1, start + Duration::from_secs(31), timeout));
+    assert!(!gate.update(0, start + Duration::from_secs(32), timeout));
+    assert!(gate.update(0, start + Duration::from_secs(42), timeout));
+}
+
+#[test]
+fn disappear_gate_ignores_unseen_content() {
+    let mut gate = DisappearGate::default();
+    let timeout = Duration::from_secs(1);
+
+    assert!(!gate.update(0, Instant::now(), timeout));
+    assert!(!gate.update(0, Instant::now() + Duration::from_secs(10), timeout));
 }

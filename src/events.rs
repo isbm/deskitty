@@ -20,13 +20,17 @@ pub struct EventsConfig {
     /// Ordered text-triggered rules. Accepts one rule or a list of rules.
     #[serde(default, deserialize_with = "one_or_many")]
     pub on_text: Vec<TextEvent>,
+    /// Rules that fire after their input disappears for a timeout.
+    #[serde(default, deserialize_with = "one_or_many")]
+    pub on_disappear: Vec<DisappearEvent>,
 }
 
 impl EventsConfig {
-    /// Validate rule IDs and skip targets.
+    /// Validate rule IDs, skip targets, and actions.
     ///
-    /// IDs must be unique and non-empty. A `skip` target must exist and must
-    /// appear below the rule that references it.
+    /// Text-rule IDs must be unique and non-empty. A `skip` target must exist
+    /// and must appear below the rule that references it. Actions must use
+    /// known sounds, and disappearance actions cannot repeat.
     pub fn validate(&self) -> Result<()> {
         let mut ids: HashMap<&str, usize> = HashMap::new();
 
@@ -64,12 +68,37 @@ impl EventsConfig {
             }
         }
 
+        for (idx, event) in self.on_disappear.iter().enumerate() {
+            if let Some(action) = &event.action {
+                if action.repeat.is_some() {
+                    bail!("on_disappear event {} cannot use repeat", disappear_label(idx, event));
+                }
+                if let Some(sound) = action.sound.as_deref() {
+                    if sound.trim().is_empty() {
+                        bail!("on_disappear event {} has an empty sound name", disappear_label(idx, event));
+                    }
+                    if sounds::find(sound).is_none() {
+                        let available = sounds::names().collect::<Vec<_>>().join(", ");
+                        bail!("on_disappear event {} references unknown sound '{sound}' (available: {available})", disappear_label(idx, event));
+                    }
+                }
+            }
+        }
+
         Ok(())
     }
 
     /// Whether any rule uses an embedded sound.
     pub fn uses_sounds(&self) -> bool {
         self.on_text.iter().any(|event| event.action.as_ref().is_some_and(|action| action.sound.is_some()))
+            || self.on_disappear.iter().any(|event| event.action.as_ref().is_some_and(|action| action.sound.is_some()))
+    }
+}
+
+fn disappear_label(idx: usize, event: &DisappearEvent) -> String {
+    match event.id.as_deref() {
+        Some(id) => format!("#{} ('{id}')", idx + 1),
+        None => format!("#{}", idx + 1),
     }
 }
 
@@ -87,6 +116,42 @@ pub struct TextEvent {
     /// this rule's input is visible.
     #[serde(default, deserialize_with = "one_or_many")]
     pub skip: Vec<String>,
+}
+
+/// A rule that fires after its input disappears for a timeout.
+#[derive(Debug, Clone, Deserialize)]
+pub struct DisappearEvent {
+    /// Optional identifier used in debug output.
+    #[serde(default)]
+    pub id: Option<String>,
+    pub input: TextInput,
+    /// How long the input must remain absent before the action fires.
+    #[serde(deserialize_with = "deserialize_timeout")]
+    pub timeout: Duration,
+    /// Action performed when the timeout expires.
+    #[serde(default)]
+    pub action: Option<EventAction>,
+}
+
+impl DisappearEvent {
+    /// Count visible occurrences that satisfy the text and background filters.
+    pub fn match_count(&self, screen: &Screen) -> usize {
+        self.input.match_count(screen)
+    }
+}
+
+fn deserialize_timeout<'de, D>(deserializer: D) -> Result<Duration, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let seconds = f64::deserialize(deserializer)?;
+    if !seconds.is_finite() || seconds <= 0.0 {
+        return Err(de::Error::custom("timeout must be a positive number of seconds"));
+    }
+    if seconds > 86_400.0 {
+        return Err(de::Error::custom("timeout must be at most 86400 seconds"));
+    }
+    Ok(Duration::from_secs_f64(seconds))
 }
 
 /// Visible-text pattern to match.
@@ -711,6 +776,74 @@ fn parse_keystroke(raw: &str) -> Option<KeyEvent> {
     let event = KeyEvent::new(code, modifiers);
     crate::compositor::key_to_bytes(&event, false)?;
     Some(event)
+}
+
+/// Indices of `on_disappear` rules that fired this tick.
+#[derive(Debug, Default)]
+pub struct DisappearRun {
+    pub fired: Vec<usize>,
+}
+
+/// Per-tab, per-rule disappearance state.
+#[derive(Debug, Default, Clone)]
+pub struct DisappearGate {
+    state: DisappearState,
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+enum DisappearState {
+    #[default]
+    Waiting,
+    Visible,
+    Missing {
+        since: Instant,
+    },
+    Fired,
+}
+
+impl DisappearGate {
+    /// Feed the current match count.
+    ///
+    /// Returns `true` once when a previously visible input has been absent for
+    /// at least `timeout`.
+    pub fn update(&mut self, count: usize, now: Instant, timeout: Duration) -> bool {
+        match self.state {
+            DisappearState::Waiting => {
+                if count > 0 {
+                    self.state = DisappearState::Visible;
+                }
+                false
+            }
+            DisappearState::Visible => {
+                if count == 0 {
+                    self.state = DisappearState::Missing { since: now };
+                }
+                false
+            }
+            DisappearState::Missing { since } => {
+                if count > 0 {
+                    self.state = DisappearState::Visible;
+                    false
+                } else if now.saturating_duration_since(since) >= timeout {
+                    self.state = DisappearState::Fired;
+                    true
+                } else {
+                    false
+                }
+            }
+            DisappearState::Fired => {
+                if count > 0 {
+                    self.state = DisappearState::Visible;
+                }
+                false
+            }
+        }
+    }
+
+    /// Reset the gate to its initial state.
+    pub fn reset(&mut self) {
+        *self = Self::default();
+    }
 }
 
 /// Per-tab, per-event occurrence gate.
