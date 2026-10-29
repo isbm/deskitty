@@ -1,0 +1,13 @@
+tabs:
+  - name: "OpenCode"
+    shortcut: "o"
+    command: ["opencode"]
+    default: true
+
+  - name: "Crush"
+    shortcut: "c"
+    command: ["crush"]
+
+  - name: "Shell"
+    shortcut: "s"
+    command: ["bash"]
