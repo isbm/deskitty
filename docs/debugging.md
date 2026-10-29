@@ -23,7 +23,7 @@ When debug mode is active and at least one rule exists, a floating panel is
 drawn in the top-right corner:
 
 - width: 50 columns
-- height: 5 rows total
+- height: 10 rows total
 - 1 row from the top
 - 4 columns from the right
 
@@ -111,16 +111,38 @@ When an earlier guard suppresses an action:
 SKIP allow-once <- deny-script
 ```
 
-No keystrokes are sent in debug mode, and action sounds are not played. These
-lines show what working mode would do.
+With `actions: true` (the default), the logged action also runs. With
+`actions: false`, the trace still shows the firing rule, but no keystrokes are
+sent and no sounds are played.
+
+## Disappearance trace
+
+Each `on_disappear` rule logs its lifecycle:
+
+```text
+WAIT D1 "Thinking ..."
+TRACK D1
+TIMEOUT D1 5s
+CANCEL D1
+FIRE D1 sound=tada
+```
+
+- `WAIT` is logged once when the console starts and shows the configured text.
+- `TRACK` means the input became visible and the rule is armed.
+- `TIMEOUT` means the input disappeared and the timeout started.
+- `CANCEL` means the input reappeared before the timeout elapsed.
+- `FIRE` means the timeout elapsed.
+
+If a rule never logs `TRACK`, its `input.content` does not match the visible
+screen. Use the `D1` sample lines to compare the actual text and attributes.
 
 ## Selector workflow
 
-1. Set `debug: true`.
+1. Set `actions: false` and `debug: true`.
 2. Run deskitty and trigger the screen state you want to match.
 3. Find the sample that represents the desired row.
 4. Copy its `background:` line into the rule input.
-5. Set `debug: false` and restart.
+5. Set `actions: true` and `debug: false`, then restart.
 
 For example, if the desired row reports:
 

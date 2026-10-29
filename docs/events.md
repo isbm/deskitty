@@ -269,8 +269,10 @@ Consequences:
 - A brief flicker shorter than `timeout` does not fire.
 - Continued absence after firing does not fire repeatedly.
 - Reappearance re-arms the rule.
-- `Stop actions` and debug mode suppress the action, but the timeout still
-  consumes the firing; it is not replayed after resuming.
+- `actions: false` and `Stop actions` suppress the action, but the timeout
+  still consumes the firing; it is not replayed after resuming.
+- When tracing, the rule logs `TRACK`, `TIMEOUT`, `CANCEL`, and `FIRE`
+  transitions. See [Debug mode](debugging.md#disappearance-trace).
 
 Like `on_text`, disappearance rules only track the active tab. Their state is
 reset when you switch back to a tab, so time spent on other tabs is not
