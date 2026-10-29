@@ -13,12 +13,19 @@ pub struct Config {
     /// Screen-triggered automation events.
     #[serde(default)]
     pub events: EventsConfig,
-    /// Scan/debug mode: evaluate and log events without sending keystrokes.
+    /// Execute automatic event actions (keystrokes and sounds).
+    #[serde(default = "default_actions")]
+    pub actions: bool,
+    /// Show the event trace console.
     #[serde(default)]
     pub debug: bool,
     /// Show the colored frame and status bar.
     #[serde(default = "default_show_desktop")]
     pub show_desktop: bool,
+}
+
+fn default_actions() -> bool {
+    true
 }
 
 fn default_show_desktop() -> bool {
@@ -109,6 +116,7 @@ fn default_config() -> Config {
     Config {
         tabs: vec![TabConfig { name: "Shell".to_string(), shortcut: 's', command: vec!["bash".to_string()], cwd: None, default: true }],
         events: EventsConfig::default(),
+        actions: true,
         debug: false,
         show_desktop: true,
     }

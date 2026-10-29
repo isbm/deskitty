@@ -61,7 +61,7 @@ fn run() -> Result<(), String> {
     let mut term = ratatui::Terminal::new(backend).map_err(|e| e.to_string())?;
 
     let size = term.size().map_err(|e| e.to_string())?;
-    let mut actions_stopped = false;
+    let mut actions_stopped = !cfg.actions;
     let mut show_desktop = cfg.show_desktop;
     let (mut grid_rows, mut grid_cols) = grid_dimensions(size.width, size.height, show_desktop);
 
@@ -69,7 +69,7 @@ fn run() -> Result<(), String> {
     let mut scan = scan::ScanState::default();
     let mut sounds = audio::SoundPlayer::new();
     let mut mode = match sounds.reason() {
-        Some(reason) if !cfg.debug && cfg.events.uses_sounds() => Mode::Notice(Notice::new(
+        Some(reason) if cfg.actions && cfg.events.uses_sounds() => Mode::Notice(Notice::new(
             "Sounds disabled",
             vec![
                 format!("Sounds are disabled: {reason}."),

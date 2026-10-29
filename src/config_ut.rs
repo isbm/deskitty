@@ -53,6 +53,15 @@ fn leaves_other_paths_unchanged() {
 }
 
 #[test]
+fn actions_defaults_true_and_parses_false() {
+    let cfg = parse("tabs: []\n");
+    assert!(cfg.actions);
+
+    let cfg = parse("actions: false\n");
+    assert!(!cfg.actions);
+}
+
+#[test]
 fn parses_debug_flag() {
     let cfg = parse("debug: true\n");
     assert!(cfg.debug);
