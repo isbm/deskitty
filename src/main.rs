@@ -1,3 +1,4 @@
+mod audio;
 mod clidef;
 mod compositor;
 mod config;
@@ -24,7 +25,7 @@ mod sounds_ut;
 #[cfg(test)]
 mod terminal_ut;
 
-use compositor::{MenuOptions, MenuState, Mode};
+use compositor::{MenuOptions, MenuState, Mode, Notice};
 use crossterm::ExecutableCommand;
 use crossterm::event::{Event, KeyCode, KeyModifiers};
 use ratatui::backend::CrosstermBackend;
@@ -66,7 +67,18 @@ fn run() -> Result<(), String> {
 
     let mut ws = workspace::Workspace::spawn_all(&cfg.tabs, grid_rows, grid_cols).map_err(|e| e.to_string())?;
     let mut scan = scan::ScanState::default();
-    let mut mode = Mode::Normal;
+    let mut sounds = audio::SoundPlayer::new();
+    let mut mode = match sounds.reason() {
+        Some(reason) if !cfg.debug && cfg.events.uses_sounds() => Mode::Notice(Notice::new(
+            "Sounds disabled",
+            vec![
+                format!("Sounds are disabled: {reason}."),
+                "Install paplay, pw-play, aplay, or ffplay".to_string(),
+                "to enable action sounds.".to_string(),
+            ],
+        )),
+        _ => Mode::Normal,
+    };
     let mut dirty = true;
     let mut prev_bg_active = false;
     let tick = Duration::from_millis(16);
@@ -111,6 +123,16 @@ fn run() -> Result<(), String> {
             };
             if cfg.debug && scan.update(&cfg.events.on_text, ws.active_tab().terminal.screen(), &run) {
                 dirty = true;
+            }
+            if action_mode == workspace::ActionMode::Active {
+                for outcome in &run.outcomes {
+                    if let events::EventOutcome::Fired { event } = outcome
+                        && let Some(action) = &cfg.events.on_text[*event].action
+                        && let Some(sound) = &action.sound
+                    {
+                        sounds.play(sound);
+                    }
+                }
             }
             ws.tick_actions(Instant::now(), action_mode != workspace::ActionMode::Active).map_err(|e| e.to_string())?;
 
@@ -214,6 +236,13 @@ fn run() -> Result<(), String> {
                                         }
                                     }
                                 }
+                            }
+                            _ => {}
+                        },
+                        Mode::Notice(_) => match key.code {
+                            KeyCode::Enter | KeyCode::Esc | KeyCode::Char(' ') => {
+                                mode = Mode::Normal;
+                                dirty = true;
                             }
                             _ => {}
                         },

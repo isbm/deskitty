@@ -7,7 +7,7 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Widget};
 use ratatui_glamour::color::{blend_1d, blend_2d, lerp_color};
 use ratatui_glamour::rule::dashed_title;
-use ratatui_glamour::surface::gradient_rounded_panel_lines;
+use ratatui_glamour::surface::{centered_rect, gradient_rounded_panel_lines, render_gradient_rounded_panel};
 
 use crate::scan::ScanState;
 use crate::sysinfo::SysInfo;
@@ -96,12 +96,29 @@ impl MenuState {
     }
 }
 
+/// A modal notice window.
+pub struct Notice {
+    /// Window headline.
+    pub title: String,
+    /// Body lines, centered one per row.
+    pub lines: Vec<String>,
+}
+
+impl Notice {
+    /// Create a modal notice with a title and body lines.
+    pub fn new(title: impl Into<String>, lines: Vec<String>) -> Self {
+        Self { title: title.into(), lines }
+    }
+}
+
 /// Current interaction mode.
 pub enum Mode {
     /// Keys are forwarded to the active tab's PTY.
     Normal,
     /// A popup menu is displayed; keys navigate the menu.
     Command(MenuState),
+    /// A modal notice is displayed; any dismiss key closes it.
+    Notice(Notice),
 }
 
 struct GradientRect {
@@ -248,6 +265,96 @@ pub fn render(
     if let Mode::Command(menu) = mode {
         render_menu(f, area, menu);
     }
+
+    if let Mode::Notice(notice) = mode {
+        render_notice(f, area, notice);
+    }
+}
+
+fn render_notice(f: &mut Frame, area: Rect, notice: &Notice) {
+    const BORDER: [Color; 5] = [Color::Indexed(205), Color::Indexed(99), Color::Indexed(51), Color::Indexed(99), Color::Indexed(205)];
+    const TEXT: [Color; 3] = [Color::Rgb(255, 240, 100), Color::Rgb(255, 170, 50), Color::Rgb(255, 50, 50)];
+
+    let width = 62.min(area.width.saturating_sub(4));
+    let height = 10.min(area.height.saturating_sub(2));
+    if width < 20 || height < 6 {
+        return;
+    }
+
+    let dialog = centered_rect(area, width, height);
+    f.render_widget(&MenuShadow { area: dialog }, area);
+
+    let inner = render_gradient_rounded_panel(f.buffer_mut(), dialog, Style::default().bg(Color::Indexed(234)), &BORDER);
+    if inner.width == 0 || inner.height == 0 {
+        return;
+    }
+
+    let background = blend_2d(inner.width as usize, inner.height as usize, 10.0, &[Color::Rgb(92, 62, 146), Color::Rgb(30, 20, 52)]);
+    f.render_widget(&GradientRect { colors: background, width: inner.width }, inner);
+
+    put_centered_gradient_text(f.buffer_mut(), inner, inner.y + 1, &notice.title, &TEXT);
+
+    for (idx, line) in notice.lines.iter().enumerate() {
+        let y = inner.y + 3 + idx as u16;
+        if y >= inner.bottom().saturating_sub(1) {
+            break;
+        }
+        put_centered_gradient_text(f.buffer_mut(), inner, y, line, &TEXT);
+    }
+
+    let button_width = 13.min(inner.width);
+    let button = Rect::new(inner.x + inner.width.saturating_sub(button_width) / 2, inner.bottom().saturating_sub(1), button_width, 1);
+    draw_notice_button(f.buffer_mut(), button, "Fine  :-(");
+}
+
+fn put_centered_gradient_text(buf: &mut Buffer, area: Rect, y: u16, text: &str, stops: &[Color]) {
+    if area.width == 0 || y >= area.bottom() {
+        return;
+    }
+    let chars: Vec<char> = text.chars().take(area.width as usize).collect();
+    if chars.is_empty() {
+        return;
+    }
+    let x = area.x + area.width.saturating_sub(chars.len() as u16) / 2;
+    let colors = blend_1d(chars.len(), stops);
+    for (idx, (ch, color)) in chars.into_iter().zip(colors).enumerate() {
+        let cx = x + idx as u16;
+        if cx >= area.right() {
+            break;
+        }
+        if let Some(cell) = buf.cell_mut((cx, y)) {
+            cell.set_char(ch);
+            cell.set_fg(color);
+        }
+    }
+}
+
+fn draw_notice_button(buf: &mut Buffer, area: Rect, label: &str) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+    let bg = Color::Indexed(205);
+    let fg = Color::Indexed(231);
+    for y in area.top()..area.bottom() {
+        for x in area.left()..area.right() {
+            if let Some(cell) = buf.cell_mut((x, y)) {
+                cell.set_symbol(" ");
+                cell.set_bg(bg);
+                cell.set_fg(fg);
+            }
+        }
+    }
+
+    let chars: Vec<char> = label.chars().take(area.width as usize).collect();
+    let x = area.x + area.width.saturating_sub(chars.len() as u16) / 2;
+    for (idx, ch) in chars.into_iter().enumerate() {
+        if let Some(cell) = buf.cell_mut((x + idx as u16, area.y)) {
+            cell.set_char(ch);
+            cell.set_fg(fg);
+            cell.set_bg(bg);
+            cell.set_style(Style::default().add_modifier(Modifier::UNDERLINED));
+        }
+    }
 }
 
 fn render_scan_overlay(f: &mut Frame, area: Rect, scan: &ScanState) {
@@ -372,6 +479,7 @@ fn render_status_bar(f: &mut Frame, area: Rect, _labels: &[(char, String)], _act
     let hint_text = match mode {
         Mode::Normal => " Ctrl+\\ Menu ".to_string(),
         Mode::Command(_) => " ESC Close ".to_string(),
+        Mode::Notice(_) => " OK ".to_string(),
     };
 
     let mut sys_spans: Vec<Span<'static>> = Vec::new();
