@@ -544,3 +544,104 @@ on_text:
 
     assert_eq!(run.outcomes, vec![EventOutcome::Fired { event: 0 }]);
 }
+
+#[test]
+fn parses_repeat_interval() {
+    let events: EventsConfig = serde_yaml::from_str(
+        r#"
+on_text:
+  input:
+    content: "prompt"
+  action:
+    keystroke: [down]
+    repeat: 0.5
+"#,
+    )
+    .expect("valid event config");
+
+    assert_eq!(events.on_text[0].action.as_ref().and_then(|action| action.repeat), Some(Duration::from_millis(500)));
+}
+
+#[test]
+fn rejects_invalid_repeat_values() {
+    for value in ["0", "-1", "0.0"] {
+        let yaml = format!(
+            r#"
+on_text:
+  input:
+    content: "prompt"
+  action:
+    keystroke: [down]
+    repeat: {value}
+"#
+        );
+        assert!(serde_yaml::from_str::<EventsConfig>(&yaml).is_err(), "repeat {value} should fail");
+    }
+}
+
+#[test]
+fn repeat_gate_fires_until_cleared() {
+    let mut gate = MatchGate::default();
+    let interval = Duration::from_millis(500);
+    let start = Instant::now();
+
+    assert!(!gate.update_repeating(1, start, interval));
+
+    let first = start + SETTLE;
+    assert!(gate.update_repeating(1, first, interval));
+    assert!(!gate.update_repeating(1, first + Duration::from_millis(100), interval));
+    assert!(gate.update_repeating(1, first + interval, interval));
+
+    let before_clear = first + interval + Duration::from_millis(100);
+    assert!(!gate.update_repeating(0, before_clear, interval));
+    assert!(!gate.update_repeating(0, before_clear + SETTLE, interval));
+
+    let reappear = before_clear + SETTLE + Duration::from_millis(16);
+    assert!(!gate.update_repeating(1, reappear, interval));
+    assert!(gate.update_repeating(1, reappear + SETTLE, interval));
+}
+
+#[test]
+fn repeat_rules_fire_while_visible() {
+    let events: EventsConfig = serde_yaml::from_str(
+        r#"
+on_text:
+  input:
+    content: "prompt"
+  action:
+    keystroke: [down]
+    repeat: 0.5
+"#,
+    )
+    .expect("valid event config");
+
+    let mut gates = [MatchGate::default()];
+    let counts = [1];
+    let start = Instant::now();
+
+    assert!(evaluate_events(&events.on_text, &counts, &mut gates, start).outcomes.is_empty());
+
+    let first = start + SETTLE;
+    assert_eq!(evaluate_events(&events.on_text, &counts, &mut gates, first).outcomes, vec![EventOutcome::Fired { event: 0 }]);
+    assert!(evaluate_events(&events.on_text, &counts, &mut gates, first + Duration::from_millis(100)).outcomes.is_empty());
+    assert_eq!(
+        evaluate_events(&events.on_text, &counts, &mut gates, first + Duration::from_millis(500)).outcomes,
+        vec![EventOutcome::Fired { event: 0 }]
+    );
+}
+
+#[test]
+fn repeat_gate_cadence_over_time() {
+    let mut gate = MatchGate::default();
+    let interval = Duration::from_millis(200);
+    let start = Instant::now();
+    let mut now = start;
+    let mut fires = 0;
+    for _ in 0..200 {
+        if gate.update_repeating(1, now, interval) {
+            fires += 1;
+        }
+        now += Duration::from_millis(16);
+    }
+    assert!((14..=16).contains(&fires), "unexpected fire count: {fires}");
+}

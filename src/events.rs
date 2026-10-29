@@ -102,7 +102,7 @@ pub struct TextInput {
     pub background: Vec<ColorSpec>,
 }
 
-/// Action performed when a new match appears.
+/// Action performed when a rule fires.
 #[derive(Debug, Clone, Deserialize)]
 pub struct EventAction {
     /// Keystrokes to send in order.
@@ -114,6 +114,23 @@ pub struct EventAction {
     /// Optional embedded sound to play when the action fires.
     #[serde(default)]
     pub sound: Option<String>,
+    /// Repeat the action every N seconds while the match remains visible.
+    #[serde(default, deserialize_with = "deserialize_repeat")]
+    pub repeat: Option<Duration>,
+}
+
+fn deserialize_repeat<'de, D>(deserializer: D) -> Result<Option<Duration>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let seconds = f64::deserialize(deserializer)?;
+    if !seconds.is_finite() || seconds <= 0.0 {
+        return Err(de::Error::custom("repeat must be a positive number of seconds"));
+    }
+    if seconds > 86_400.0 {
+        return Err(de::Error::custom("repeat must be at most 86400 seconds"));
+    }
+    Ok(Some(Duration::from_secs_f64(seconds)))
 }
 
 fn deserialize_delay<'de, D>(deserializer: D) -> Result<Duration, D::Error>
@@ -162,7 +179,12 @@ pub fn evaluate_events(events: &[TextEvent], counts: &[usize], gates: &mut [Matc
             }
         }
 
-        if !gates[idx].update(count, now) {
+        let repeat = event.action.as_ref().and_then(repeat_interval);
+        let fired = match repeat {
+            Some(interval) => gates[idx].update_repeating(count, now, interval),
+            None => gates[idx].update(count, now),
+        };
+        if !fired {
             continue;
         }
 
@@ -182,6 +204,16 @@ pub fn evaluate_events(events: &[TextEvent], counts: &[usize], gates: &mut [Matc
     }
 
     run
+}
+
+/// Effective repetition interval, including the time needed to send the
+/// action's own keystroke block.
+fn repeat_interval(action: &EventAction) -> Option<Duration> {
+    action.repeat.map(|repeat| {
+        let gaps = action.keystroke.len().saturating_sub(1);
+        let block = action.delay.saturating_mul(u32::try_from(gaps).unwrap_or(u32::MAX));
+        repeat.saturating_add(block)
+    })
 }
 
 fn event_label(idx: usize, event: &TextEvent) -> String {
@@ -690,6 +722,7 @@ fn parse_keystroke(raw: &str) -> Option<KeyEvent> {
 pub struct MatchGate {
     consumed: usize,
     pending: Option<(usize, Instant)>,
+    repeat_at: Option<Instant>,
 }
 
 impl MatchGate {
@@ -705,6 +738,39 @@ impl MatchGate {
                 let fire = count > self.consumed;
                 self.consumed = count;
                 fire
+            }
+            _ => {
+                self.pending = Some((count, now));
+                false
+            }
+        }
+    }
+
+    /// Feed the current match count in repeating mode.
+    ///
+    /// The first fire happens after the normal settle window. While the count
+    /// remains non-zero, the gate fires again every `interval`. A stable zero
+    /// count resets the cadence.
+    pub fn update_repeating(&mut self, count: usize, now: Instant, interval: Duration) -> bool {
+        match self.pending {
+            Some((pending, since)) if pending == count => {
+                if now.saturating_duration_since(since) < SETTLE {
+                    return false;
+                }
+                if count == 0 {
+                    self.consumed = 0;
+                    self.repeat_at = None;
+                    return false;
+                }
+                let due = self.repeat_at.is_none_or(|at| now >= at);
+                if due {
+                    self.consumed = count;
+                    self.repeat_at = Some(now + interval);
+                    true
+                } else {
+                    self.consumed = count;
+                    false
+                }
             }
             _ => {
                 self.pending = Some((count, now));
