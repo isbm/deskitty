@@ -109,13 +109,7 @@ fn run() -> Result<(), String> {
                 dirty = true;
             }
 
-            let action_mode = if cfg.debug {
-                workspace::ActionMode::Debug
-            } else if actions_stopped {
-                workspace::ActionMode::Paused
-            } else {
-                workspace::ActionMode::Active
-            };
+            let action_mode = if actions_stopped { workspace::ActionMode::Paused } else { workspace::ActionMode::Active };
             let (run, disappear_run) = if matches!(&mode, Mode::Normal) {
                 let run = ws.apply_events(&cfg.events.on_text, action_mode).map_err(|e| e.to_string())?;
                 let disappear_run = ws.apply_disappear_events(&cfg.events.on_disappear, action_mode).map_err(|e| e.to_string())?;
@@ -150,7 +144,7 @@ fn run() -> Result<(), String> {
                     Event::Key(key) => match &mut mode {
                         Mode::Normal => {
                             if key.code == KeyCode::Char('4') && key.modifiers.contains(KeyModifiers::CONTROL) {
-                                let options = MenuOptions { actions_stopped, show_desktop, actions_enabled: !cfg.debug };
+                                let options = MenuOptions { actions_stopped, show_desktop };
                                 let menu = MenuState::new(&ws.labels(), options);
                                 mode = Mode::Command(menu);
                                 dirty = true;
@@ -187,7 +181,6 @@ fn run() -> Result<(), String> {
                                     mode = Mode::Normal;
                                     dirty = true;
                                 }
-                                compositor::MenuItem::ToggleActions { enabled: false, .. } => {}
                                 compositor::MenuItem::ToggleActions { .. } => {
                                     actions_stopped = !actions_stopped;
                                     if actions_stopped {
@@ -221,7 +214,6 @@ fn run() -> Result<(), String> {
                                             mode = Mode::Normal;
                                             dirty = true;
                                         }
-                                        compositor::MenuItem::ToggleActions { enabled: false, .. } => {}
                                         compositor::MenuItem::ToggleActions { .. } => {
                                             actions_stopped = !actions_stopped;
                                             if actions_stopped {

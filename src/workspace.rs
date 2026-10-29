@@ -20,8 +20,6 @@ pub enum ActionMode {
     Active,
     /// Update match gates but send nothing.
     Paused,
-    /// Update match gates and produce debug outcomes, but send nothing.
-    Debug,
 }
 
 struct PendingAction {

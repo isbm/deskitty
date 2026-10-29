@@ -17,18 +17,11 @@ pub enum MenuItem {
     /// Switch to a tab.
     Tab { idx: usize, shortcut: char, name: String },
     /// Pause or resume automatic event keystrokes.
-    ToggleActions { stopped: bool, enabled: bool },
+    ToggleActions { stopped: bool },
     /// Hide or show the colored frame and status bar.
     ToggleDesktop { visible: bool },
     /// Quit deskitty entirely.
     Quit,
-}
-
-impl MenuItem {
-    /// Whether the item can be focused and activated.
-    pub fn selectable(&self) -> bool {
-        !matches!(self, Self::ToggleActions { enabled: false, .. })
-    }
 }
 
 /// State used to build the command menu.
@@ -38,8 +31,6 @@ pub struct MenuOptions {
     pub actions_stopped: bool,
     /// Whether the colored frame and status bar are visible.
     pub show_desktop: bool,
-    /// Whether the actions toggle can be used (false in debug mode).
-    pub actions_enabled: bool,
 }
 
 /// The command-mode popup menu state.
@@ -54,42 +45,27 @@ impl MenuState {
     pub fn new(labels: &[(char, String)], options: MenuOptions) -> Self {
         let mut items: Vec<MenuItem> =
             labels.iter().enumerate().map(|(idx, (shortcut, name))| MenuItem::Tab { idx, shortcut: *shortcut, name: name.clone() }).collect();
-        items.push(MenuItem::ToggleActions { stopped: options.actions_stopped, enabled: options.actions_enabled });
+        items.push(MenuItem::ToggleActions { stopped: options.actions_stopped });
         items.push(MenuItem::ToggleDesktop { visible: options.show_desktop });
         items.push(MenuItem::Quit);
-        let selected = items.iter().position(MenuItem::selectable).unwrap_or(0);
-        Self { items, selected }
+        Self { items, selected: 0 }
     }
 
-    /// Move selection to the next selectable item (wrapping).
+    /// Move selection to the next item (wrapping).
     pub fn next(&mut self) {
-        for offset in 1..=self.items.len() {
-            let idx = (self.selected + offset) % self.items.len();
-            if self.items[idx].selectable() {
-                self.selected = idx;
-                return;
-            }
-        }
+        self.selected = (self.selected + 1) % self.items.len();
     }
 
-    /// Move selection to the previous selectable item (wrapping).
+    /// Move selection to the previous item (wrapping).
     pub fn prev(&mut self) {
-        for offset in 1..=self.items.len() {
-            let idx = (self.selected + self.items.len() - offset) % self.items.len();
-            if self.items[idx].selectable() {
-                self.selected = idx;
-                return;
-            }
-        }
+        self.selected = (self.selected + self.items.len() - 1) % self.items.len();
     }
 
     /// Find the index of the item matching the given shortcut character.
-    ///
-    /// Returns `None` if no item matches or the matching item is disabled.
     pub fn find_by_shortcut(&self, c: char) -> Option<usize> {
         self.items.iter().position(|item| match item {
             MenuItem::Tab { shortcut, .. } => *shortcut == c,
-            MenuItem::ToggleActions { enabled, .. } => *enabled && c == 'a',
+            MenuItem::ToggleActions { .. } => c == 'a',
             MenuItem::ToggleDesktop { .. } => c == 'd',
             MenuItem::Quit => c == 'q',
         })
@@ -573,13 +549,9 @@ fn render_menu(f: &mut Frame, area: Rect, menu: &MenuState) {
     for (i, item) in menu.items.iter().enumerate() {
         let (label, hint) = match item {
             MenuItem::Tab { name, shortcut, .. } => (name.clone(), shortcut.to_uppercase().to_string()),
-            MenuItem::ToggleActions { stopped, enabled } => {
-                if *enabled {
-                    let label = if *stopped { "Resume actions" } else { "Stop actions" };
-                    (label.to_string(), "A".to_string())
-                } else {
-                    ("Actions paused".to_string(), "debug".to_string())
-                }
+            MenuItem::ToggleActions { stopped } => {
+                let label = if *stopped { "Resume actions" } else { "Stop actions" };
+                (label.to_string(), "A".to_string())
             }
             MenuItem::ToggleDesktop { visible } => {
                 let label = if *visible { "Hide desktop" } else { "Show desktop" };
@@ -588,18 +560,10 @@ fn render_menu(f: &mut Frame, area: Rect, menu: &MenuState) {
             MenuItem::Quit => ("Quit".to_string(), "Q".to_string()),
         };
 
-        let disabled = !item.selectable();
-        let selected = !disabled && i == menu.selected;
-        let item_style = if disabled {
-            Style::default().fg(crate::palette::GRAY_1)
-        } else if selected {
-            Style::default().fg(crate::palette::BLACK).bg(crate::palette::HIGHLIGHT)
-        } else {
-            Style::default().fg(crate::palette::FG)
-        };
-        let hint_style = if disabled {
-            Style::default().fg(crate::palette::FAINT)
-        } else if selected {
+        let selected = i == menu.selected;
+        let item_style =
+            if selected { Style::default().fg(crate::palette::BLACK).bg(crate::palette::HIGHLIGHT) } else { Style::default().fg(crate::palette::FG) };
+        let hint_style = if selected {
             Style::default().fg(crate::palette::BG_0).bg(crate::palette::HIGHLIGHT)
         } else {
             Style::default().fg(crate::palette::PRIMARY)
