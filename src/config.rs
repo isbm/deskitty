@@ -3,11 +3,16 @@ use serde::Deserialize;
 use std::ffi::OsStr;
 use std::path::{Component, Path, PathBuf};
 
+use crate::events::EventsConfig;
+
 /// Top-level YAML config schema.
 #[derive(Debug, Deserialize)]
 pub struct Config {
     #[serde(default)]
     pub tabs: Vec<TabConfig>,
+    /// Screen-triggered automation events.
+    #[serde(default)]
+    pub events: EventsConfig,
 }
 
 /// A single tab definition from the YAML config.
@@ -86,11 +91,13 @@ fn load_with_default_tab(path: &Path) -> anyhow::Result<Config> {
 fn load_from_path(path: &Path) -> anyhow::Result<Config> {
     let content = std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
     let config: Config = serde_yaml::from_str(&content).with_context(|| format!("parsing {}", path.display()))?;
+    config.events.validate().with_context(|| format!("validating {}", path.display()))?;
     Ok(config)
 }
 
 fn default_config() -> Config {
     Config {
         tabs: vec![TabConfig { name: "Shell".to_string(), shortcut: 's', command: vec!["bash".to_string()], cwd: None, default: true }],
+        events: EventsConfig::default(),
     }
 }

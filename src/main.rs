@@ -1,15 +1,21 @@
 mod clidef;
 mod compositor;
 mod config;
+mod events;
 mod palette;
 mod proc;
 mod pty;
+mod sounds;
 mod sysinfo;
 mod terminal;
 mod workspace;
 
 #[cfg(test)]
 mod config_ut;
+#[cfg(test)]
+mod events_ut;
+#[cfg(test)]
+mod sounds_ut;
 #[cfg(test)]
 mod terminal_ut;
 
@@ -19,7 +25,7 @@ use crossterm::event::{Event, KeyCode, KeyModifiers};
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::Rect;
 use std::io;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 fn main() {
     if let Err(err) = run() {
@@ -84,6 +90,12 @@ fn run() -> Result<(), String> {
                 mode = Mode::Normal;
                 dirty = true;
             }
+
+            let action_mode = workspace::ActionMode::Active;
+            if matches!(&mode, Mode::Normal) {
+                ws.apply_events(&cfg.events.on_text, action_mode).map_err(|e| e.to_string())?;
+            }
+            ws.tick_actions(Instant::now(), action_mode != workspace::ActionMode::Active).map_err(|e| e.to_string())?;
 
             if crossterm::event::poll(tick).map_err(|e| e.to_string())? {
                 match crossterm::event::read().map_err(|e| e.to_string())? {
