@@ -1,0 +1,34 @@
+site_name: Deskitty
+site_description: A terminal workspace manager for TUI applications.
+docs_dir: docs
+site_dir: site
+strict: true
+
+theme:
+  name: material
+  palette:
+    scheme: slate
+    primary: deep purple
+    accent: cyan
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - search.highlight
+
+nav:
+  - Home: index.md
+  - Configuration: configuration.md
+  - Events and rules: events.md
+  - Keystrokes: keystrokes.md
+  - Debug mode: debugging.md
+  - Building: building.md
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - toc:
+      permalink: true

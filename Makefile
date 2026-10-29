@@ -1,4 +1,4 @@
-.PHONY: dev release clean check test
+.PHONY: dev release clean check test docs docs-serve
 
 help:
 	@echo "dev       Build debug binary (unoptimized, with debug info)"
@@ -6,6 +6,8 @@ help:
 	@echo "clean     Remove all build artifacts (cargo clean)"
 	@echo "check     Format code and run clippy lints (auto-fix on failure)"
 	@echo "test      Run tests with cargo-nextest"
+	@echo "docs      Build the Markdown documentation site"
+	@echo "docs-serve Preview the documentation site locally"
 
 dev:
 	cargo build
@@ -23,3 +25,9 @@ check:
 
 test:
 	cargo nextest run
+
+docs:
+	mkdocs build --strict
+
+docs-serve:
+	mkdocs serve

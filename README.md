@@ -2,69 +2,88 @@
 
 **A terminal workspace manager for TUI applications.**
 
-Deskitty is a compositor that runs multiple interactive terminal programs inside a single window and lets you switch between them. Think of it as a minimal tab-based wrapper: each tab holds a full terminal session with 256-color and 24-bit RGB emulation, and you toggle between them with a popup menu.
+Deskitty runs several interactive terminal programs inside a single window and
+lets you switch between them. Each tab owns a full pseudo-terminal with
+256-color and 24-bit RGB emulation. The active tab fills the grid; a status bar
+shows the available tabs.
 
-It is built for a world where developers keep several terminal-based tools open at once — a shell here, OpenCode there, a process monitor in the corner — and want to stay inside one terminal window without giving up the feel of a real terminal.
+Configuration is a YAML file. Tabs, working directories, screen automation,
+debug scanning, and the desktop frame are all controlled from it.
 
-## How it feels
+## Features
 
-Launch deskitty with a config file that names your tabs:
+- Multiple tabs, each with its own PTY and terminal emulator.
+- Full-screen terminal grid with resize support.
+- Tab switching through a command menu.
+- Configurable working directory per tab.
+- Text-triggered automation with background-colour matching.
+- Ordered rules with IDs, guards, and skip targets.
+- Ordered keystroke lists with delays.
+- Optional embedded sounds per action.
+- Debug mode that logs observed screen attributes without sending keys.
+- Optional borderless full-screen mode.
+
+## Quick start
 
 ```sh
-deskitty -c demo/agents/config.yaml
+make dev
+./target/debug/deskitty
 ```
 
-Deskitty enters fullscreen mode. Each tab runs its own program inside a pseudo-terminal. The active tab renders at full size with complete terminal emulation. A status bar sits at the bottom showing all open tabs and the current one highlighted.
+Without a configuration file, deskitty starts a single `bash` tab. The default
+config path is `~/.config/deskitty/config.yaml`; use `-c` for a different file.
 
-Press `Ctrl+\` anywhere to bring up the command menu. Switch tabs by selecting one with the arrow keys or pressing its shortcut letter. The menu dismisses with `Esc`, and `q` quits the whole session.
-
-```
-┌──────────────────────────────────────────────┐
-│                                              │
-│             opencode (active tab)            │
-│              full terminal grid              │
-│                                              │
-├──────────────────────────────────────────────┤
-│ o:OpenCode | *s:Shell* | Ctrl+\ Menu         │
-└──────────────────────────────────────────────┘
+```sh
+./target/debug/deskitty -c path/to/config.yaml
 ```
 
-Keys typed while the menu is hidden flow directly to the active tab. The child process sees a real terminal — it can move the cursor, set colors, use the alternate screen, and receive resize events.
+## Controls
 
-## Config
+| Key | Action |
+| --- | --- |
+| `Ctrl+\` | Open or close the command menu |
+| `Up` / `Down` | Move through menu items |
+| `Enter` | Activate the selected item |
+| Shortcut letter | Activate a tab or menu item directly |
+| `Esc` | Close the menu |
+| `q` | Quit from the command menu |
 
-Tabs are declared in a YAML file:
+Keys typed while the menu is closed go directly to the active tab.
 
-```yaml
-tabs:
-  - name: "OpenCode"
-    shortcut: "o"
-    command: ["opencode"]
-    default: true
-  - name: "Shell"
-    shortcut: "s"
-    command: ["bash"]
+## Documentation
+
+Full documentation lives in [`docs/`](docs/) and is generated as a static
+website with MkDocs:
+
+```sh
+python3 -m pip install -r requirements-docs.txt
+make docs
 ```
 
-The config is optional. Without it, deskitty starts a single `bash` tab.
+The generated site is written to `site/`. Preview it locally with:
 
-## How it is built
+```sh
+make docs-serve
+```
 
-Deskitty is written in Rust. The rendering stack uses Ratatui for layout and compositing, Crossterm for raw terminal I/O, a `vt100`-backed cell grid for ANSI parsing, and `portable-pty` for pseudo-terminal management.
-
-The entire frame — terminal grid, status bar, and popup menu — is assembled by Ratatui on each tick. Child output flows from the PTY into the ANSI parser, which pushes styled cells onto the grid. Key presses flow the other direction, through Crossterm into the active PTY.
+- [Configuration](docs/configuration.md)
+- [Events and rules](docs/events.md)
+- [Keystrokes](docs/keystrokes.md)
+- [Debug mode](docs/debugging.md)
+- [Building](docs/building.md)
 
 ## Building
 
 ```sh
 make dev       # debug build
 make release   # optimized release build
-make check     # format + clippy
+make check     # format and clippy
+make test      # cargo-nextest
 make clean     # remove build artifacts
 ```
 
-Just `make` prints the available targets.
-
 ## Status
 
-Deskitty is in an early stage. The current version proves the core architecture: PTY spawning, full terminal emulation, Ratatui compositing, multi-tab management, and a popup command menu. More features are planned but not yet built.
+Deskitty is in an early stage. The current version proves the core
+architecture: PTY spawning, full terminal emulation, Ratatui compositing,
+multi-tab management, configurable events, and a popup command menu.
