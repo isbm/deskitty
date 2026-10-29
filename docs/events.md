@@ -1,7 +1,8 @@
 # Events and rules
 
 Events watch the visible screen of the active tab and perform actions when
-configured text appears. Rules are evaluated **top to bottom** every tick.
+configured text appears or disappears. Rules are evaluated **top to bottom**
+every tick.
 
 ## Basic rule
 
@@ -178,6 +179,104 @@ order.
 
 Stopping actions, closing the tab, or entering debug mode clears the pending
 action queue.
+
+## Repeat actions
+
+Actions fire once per new stable match by default. Add `repeat` to keep firing
+while the match remains visible:
+
+```yaml
+action:
+  keystroke: [down]
+  repeat: 0.5
+```
+
+- `repeat` is in seconds.
+- The first repetition happens after the normal stable-match window.
+- While the match is visible, the action fires again every `repeat` seconds.
+- Repetition stops when the match disappears.
+- If the match reappears, repetition starts again.
+- Omit `repeat` for unique-appearance mode.
+- `repeat` must be greater than zero.
+
+`delay` and `repeat` serve different purposes:
+
+- `delay` is the pause between keys inside one repetition.
+- `repeat` is the pause between repetitions.
+
+For example, this sends `right`, waits 100 ms, sends `enter`, then waits 500 ms
+before starting the whole sequence again:
+
+```yaml
+action:
+  keystroke:
+    - right
+    - enter
+  delay: 0.1
+  repeat: 0.5
+```
+
+If the keystroke block itself takes longer than `repeat`, the next repetition
+waits for the block to finish rather than queuing up.
+
+Repetition behavior:
+
+- Skipped actions do not fire, but their repeat cadence continues.
+- `Stop actions` and debug mode send nothing.
+- Sounds repeat with the action.
+- In debug mode, every would-be repetition logs its own `FIRE` line.
+
+## On disappear
+
+`on_disappear` fires an action after its input disappears for a timeout. This
+is useful for detecting when a progress message such as `Thinking ...` has
+finished:
+
+```yaml
+events:
+  on_disappear:
+    - id: "agent-finished"
+      input:
+        content: "Thinking ..."
+        # background: ["#005f00"]   # optional, same as on_text
+      timeout: 10                  # seconds
+      action:
+        sound: tada
+```
+
+- `on_disappear` accepts one rule or a list.
+- `input` uses the same `content` and `background` matching as `on_text`.
+- `timeout` is required and is in seconds. It must be greater than zero.
+- `action` uses the same keystrokes, `delay`, and `sound` fields as `on_text`.
+- `repeat` is not allowed on an `on_disappear` action.
+- `id` is optional and is used as a label in debug output.
+- `on_disappear` rules do not take part in `skip` guards.
+
+Lifecycle:
+
+1. The rule waits until its input becomes visible.
+2. Once visible, the rule is armed.
+3. When the input disappears, the timeout starts.
+4. If the input reappears before the timeout, the timer is cancelled and the
+   rule stays armed.
+5. If the input remains absent for the timeout, the action fires once and the
+   rule waits for the input to reappear.
+6. A later disappearance starts a new timeout and can fire again.
+
+Consequences:
+
+- Input that was never visible never fires.
+- A brief flicker shorter than `timeout` does not fire.
+- Continued absence after firing does not fire repeatedly.
+- Reappearance re-arms the rule.
+- `Stop actions` and debug mode suppress the action, but the timeout still
+  consumes the firing; it is not replayed after resuming.
+
+Like `on_text`, disappearance rules only track the active tab. Their state is
+reset when you switch back to a tab, so time spent on other tabs is not
+counted; the rule arms again once its input is visible. When both rule types
+fire in the same tick, `on_text` actions are queued first, followed by
+`on_disappear` actions.
 
 ## Sounds
 

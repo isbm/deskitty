@@ -15,7 +15,8 @@ action:
 ```
 
 Keys execute in list order. Use [`delay`](events.md#delays) to pause between
-consecutive keys.
+consecutive keys, and [`repeat`](events.md#repeat-actions) to repeat the whole
+key list while the match remains visible.
 
 ## Case sensitivity
 

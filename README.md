@@ -17,8 +17,10 @@ debug scanning, and the desktop frame are all controlled from it.
 - Tab switching through a command menu.
 - Configurable working directory per tab.
 - Text-triggered automation with background-colour matching.
+- Disappearance triggers with a configurable timeout.
 - Ordered rules with IDs, guards, and skip targets.
 - Ordered keystroke lists with delays.
+- Optional repeating actions while a match remains visible.
 - Optional embedded sounds per action.
 - Debug mode that logs observed screen attributes without sending keys.
 - Optional borderless full-screen mode.

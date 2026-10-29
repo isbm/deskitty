@@ -17,8 +17,10 @@ debug scanning, and the desktop frame are all controlled from it.
 - Tab switching through a command menu.
 - Configurable working directory per tab.
 - Text-triggered automation with background-colour matching.
+- Disappearance triggers with a configurable timeout.
 - Ordered rules with IDs, guards, and skip targets.
 - Ordered keystroke lists with delays.
+- Optional repeating actions while a match remains visible.
 - Optional embedded action sounds.
 - Debug mode that logs observed screen attributes without sending keys.
 - Optional borderless full-screen mode.
@@ -57,7 +59,8 @@ Keys typed while the menu is closed go directly to the active tab.
 ## Documentation
 
 - [Configuration](configuration.md) — tabs, working directories, desktop, menu.
-- [Events and rules](events.md) — matching, ordering, guards, sounds, delays.
+- [Events and rules](events.md) — matching, ordering, guards, disappearance
+  timers, sounds, delays.
 - [Keystrokes](keystrokes.md) — complete key reference and modifiers.
 - [Debug mode](debugging.md) — scanning screen attributes and tuning selectors.
 - [Building](building.md) — development, tests, and documentation site.

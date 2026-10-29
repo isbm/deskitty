@@ -1,7 +1,7 @@
 # Debug mode
 
-Debug mode scans configured rules and reports what the terminal actually
-contains, without sending any keystrokes.
+Debug mode scans configured text and disappearance rules and reports what the
+terminal actually contains, without sending any keystrokes.
 
 ```yaml
 debug: true
@@ -71,6 +71,14 @@ sees.
 Samples with identical attributes are not appended repeatedly. Scrolling or
 redrawing the same content does not flood the log.
 
+When several rules are configured, text samples are prefixed with `#1`, `#2`,
+and so on. Disappearance samples use `D1`, `D2`, and so on. The prefixes make
+it clear which rule observed each value. An [`on_disappear`](events.md#on-disappear)
+rule is sampled while its input is visible, exactly like a text rule.
+
+`[n]` in the overlay title is the total number of visible matches for all
+configured rules.
+
 ## Fire and skip lines
 
 When a rule's action would fire:
@@ -80,6 +88,15 @@ FIRE allow-once RIGHT+ENTER sound=accept
 ```
 
 If the action has no sound, the `sound=` suffix is omitted.
+
+If the action uses [`repeat`](events.md#repeat-actions), every would-be
+repetition logs its own `FIRE` line.
+
+When an `on_disappear` timeout expires, its action logs a normal `FIRE` line:
+
+```text
+FIRE agent-finished sound=tada
+```
 
 When an earlier guard suppresses an action:
 
