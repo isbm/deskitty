@@ -1,13 +1,20 @@
 # Debug mode
 
-Debug mode scans configured text and disappearance rules and reports what the
-terminal actually contains, without sending any keystrokes.
+Debug mode adds a trace console for configured text and disappearance rules. It
+does not change whether actions execute.
 
 ```yaml
 debug: true
 ```
 
-The flag is read at startup. To switch back to working mode, set
+To trace without sending keystrokes or playing sounds, also disable actions:
+
+```yaml
+actions: false
+debug: true
+```
+
+Both flags are read at startup. To switch back to working mode, set
 `debug: false` and restart.
 
 ## Overlay
@@ -27,7 +34,7 @@ SCAN "Allow once" [1] fire=1 skip=0
 ```
 
 - `[1]` is the number of visible content matches.
-- `fire` is the number of actions that would have fired since debug started.
+- `fire` is the number of rules that fired since debug started.
 - `skip` is the number of actions suppressed by guards since debug started.
 
 ## Match samples
@@ -81,7 +88,7 @@ configured rules.
 
 ## Fire and skip lines
 
-When a rule's action would fire:
+When a rule fires:
 
 ```text
 FIRE allow-once RIGHT+ENTER sound=accept
@@ -89,8 +96,8 @@ FIRE allow-once RIGHT+ENTER sound=accept
 
 If the action has no sound, the `sound=` suffix is omitted.
 
-If the action uses [`repeat`](events.md#repeat-actions), every would-be
-repetition logs its own `FIRE` line.
+If the action uses [`repeat`](events.md#repeat-actions), every repetition logs
+its own `FIRE` line.
 
 When an `on_disappear` timeout expires, its action logs a normal `FIRE` line:
 
@@ -132,13 +139,10 @@ input:
 Other occurrences of the same text with different backgrounds will no longer
 match.
 
-## Menu behavior
+## Actions while tracing
 
-Debug mode already suppresses all automatic actions. The command menu keeps the
-actions toggle visible but disabled:
-
-```text
-Actions paused      debug
-```
+Debug mode does not disable actions. Use `actions: false` in the configuration,
+or the `Stop actions` command-menu item, when you want to inspect a screen
+without sending anything.
 
 `Hide desktop` and `Show desktop` remain available.

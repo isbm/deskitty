@@ -129,7 +129,7 @@ starts.
 
 ## Debug output
 
-In [debug mode](debugging.md), fired actions display their keys using canonical
+When [tracing](debugging.md), fired actions display their keys using canonical
 names:
 
 ```text

@@ -18,6 +18,7 @@ configuration is reported as an error at startup.
 ## Full example
 
 ```yaml
+actions: true
 show_desktop: true
 debug: false
 
@@ -65,6 +66,27 @@ launched.
 The directory must exist. An invalid directory is reported when the tab is
 spawned.
 
+## Actions
+
+Automatic event actions are enabled by default:
+
+```yaml
+actions: true
+```
+
+Set it to `false` to start with actions paused:
+
+```yaml
+actions: false
+```
+
+While actions are paused, match gates continue to update, so resuming does not
+replay prompts that appeared during the pause. Keystrokes and sounds are not
+sent or played.
+
+The setting only controls the starting state. It can be toggled at runtime from
+the command menu.
+
 ## Desktop frame
 
 The colored frame and status bar are shown by default:
@@ -97,19 +119,11 @@ Press `Ctrl+\` to open the menu. It contains, in order:
 
 ### Actions toggle
 
-`Stop actions` pauses automatic event keystrokes. Normal typing is unaffected.
-Match gates continue to update while paused, so resuming does not replay
-prompts that appeared during the pause.
+`Stop actions` pauses automatic event keystrokes and sounds. Normal typing is
+unaffected. Match gates continue to update while paused, so resuming does not
+replay prompts that appeared during the pause.
 
-In debug mode, actions are already suppressed. The item remains visible but is
-disabled and reads:
-
-```text
-Actions paused      debug
-```
-
-Disabled items are skipped by arrow navigation and cannot be activated by
-their shortcut.
+The toggle always starts in the state configured by `actions`.
 
 ### Desktop toggle
 
@@ -121,13 +135,21 @@ Both toggles take effect immediately without restarting.
 
 ## Debug mode
 
-Set `debug: true` to scan automatically without sending keystrokes:
+Set `debug: true` to show the trace console:
 
 ```yaml
 debug: true
 ```
 
-See [Debug mode](debugging.md) for the overlay and workflow.
+Debug mode only adds tracing. It does not change whether actions execute. To
+trace without sending keystrokes or playing sounds, also set `actions: false`:
+
+```yaml
+actions: false
+debug: true
+```
+
+See [Debug mode](debugging.md) for the console and workflow.
 
 ## Event rules
 

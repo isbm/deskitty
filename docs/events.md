@@ -177,8 +177,8 @@ The delay scheduler is non-blocking. Rendering and input continue while keys
 are queued. Multiple firing rules execute their action blocks in configuration
 order.
 
-Stopping actions, closing the tab, or entering debug mode clears the pending
-action queue.
+Stopping actions or closing the tab clears the pending action queue. Debug
+mode does not affect the queue.
 
 ## Repeat actions
 
@@ -222,9 +222,9 @@ waits for the block to finish rather than queuing up.
 Repetition behavior:
 
 - Skipped actions do not fire, but their repeat cadence continues.
-- `Stop actions` and debug mode send nothing.
+- `actions: false` and `Stop actions` send nothing.
 - Sounds repeat with the action.
-- In debug mode, every would-be repetition logs its own `FIRE` line.
+- When tracing, every repetition logs its own `FIRE` line.
 
 ## On disappear
 
@@ -305,7 +305,7 @@ Semantics:
 
 - The sound plays when the action fires, before its keystrokes.
 - Skipped actions play no sound.
-- `Stop actions` and debug mode play no sound.
+- `actions: false` and `Stop actions` play no sound.
 - Unknown sound names are configuration errors.
 - The WAV files are embedded in the binary at build time. Keep them under
   `sounds/` in the repository.
@@ -326,7 +326,7 @@ normal typing work, but sounds remain disabled.
 The notice does not appear when:
 
 - no action uses `sound:`,
-- debug mode is active,
+- actions are disabled at startup (`actions: false`),
 - a supported player is available and its sound files were prepared successfully.
 
 ## Complete example

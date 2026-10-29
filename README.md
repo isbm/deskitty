@@ -22,7 +22,8 @@ debug scanning, and the desktop frame are all controlled from it.
 - Ordered keystroke lists with delays.
 - Optional repeating actions while a match remains visible.
 - Optional embedded sounds per action.
-- Debug mode that logs observed screen attributes without sending keys.
+- Startup switch to disable automatic actions.
+- Debug trace console for matches, disappearance lifecycles, and fired actions.
 - Optional borderless full-screen mode.
 
 ## Quick start
@@ -71,7 +72,7 @@ make docs-serve
 - [Configuration](docs/configuration.md)
 - [Events and rules](docs/events.md)
 - [Keystrokes](docs/keystrokes.md)
-- [Debug mode](docs/debugging.md)
+- [Debug mode](docs/debugging.md) — trace console and selector workflow
 - [Building](docs/building.md)
 
 ## Building

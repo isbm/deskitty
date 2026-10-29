@@ -22,7 +22,8 @@ debug scanning, and the desktop frame are all controlled from it.
 - Ordered keystroke lists with delays.
 - Optional repeating actions while a match remains visible.
 - Optional embedded action sounds.
-- Debug mode that logs observed screen attributes without sending keys.
+- Startup switch to disable automatic actions.
+- Debug trace console for matches, disappearance lifecycles, and fired actions.
 - Optional borderless full-screen mode.
 
 ## Quick start
@@ -62,5 +63,5 @@ Keys typed while the menu is closed go directly to the active tab.
 - [Events and rules](events.md) — matching, ordering, guards, disappearance
   timers, sounds, delays.
 - [Keystrokes](keystrokes.md) — complete key reference and modifiers.
-- [Debug mode](debugging.md) — scanning screen attributes and tuning selectors.
+- [Debug mode](debugging.md) — trace console for matches, timers, and actions.
 - [Building](building.md) — development, tests, and documentation site.
