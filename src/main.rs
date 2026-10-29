@@ -123,7 +123,7 @@ fn run() -> Result<(), String> {
             } else {
                 (events::EventRun::default(), events::DisappearRun::default())
             };
-            if cfg.debug && scan.update(&cfg.events.on_text, ws.active_tab().terminal.screen(), &run) {
+            if cfg.debug && scan.update(&cfg.events.on_text, &cfg.events.on_disappear, ws.active_tab().terminal.screen(), &run, &disappear_run) {
                 dirty = true;
             }
             if action_mode == workspace::ActionMode::Active {

@@ -138,6 +138,11 @@ impl DisappearEvent {
     pub fn match_count(&self, screen: &Screen) -> usize {
         self.input.match_count(screen)
     }
+
+    /// Sample every visible content match for debug scanning.
+    pub(crate) fn scan_samples(&self, screen: &Screen) -> Vec<ScanSample> {
+        self.input.scan_samples(screen)
+    }
 }
 
 fn deserialize_timeout<'de, D>(deserializer: D) -> Result<Duration, D::Error>

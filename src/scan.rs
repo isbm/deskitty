@@ -1,4 +1,4 @@
-use crate::events::{ColorSpec, EventAction, EventOutcome, EventRun, ScanSample, TextEvent};
+use crate::events::{ColorSpec, DisappearEvent, DisappearRun, EventAction, EventOutcome, EventRun, ScanSample, TextEvent};
 use std::collections::VecDeque;
 use vt100::Screen;
 
@@ -17,7 +17,8 @@ pub struct ScanLine {
 #[derive(Debug, Default)]
 pub struct ScanState {
     lines: VecDeque<ScanLine>,
-    last: Vec<Vec<String>>,
+    last_text: Vec<Vec<String>>,
+    last_disappear: Vec<Vec<String>>,
     title: String,
     live: usize,
     fires: usize,
@@ -30,49 +31,45 @@ impl ScanState {
     /// outcomes for this tick.
     ///
     /// Returns `true` when the overlay needs to be redrawn.
-    pub fn update(&mut self, events: &[TextEvent], screen: &Screen, run: &EventRun) -> bool {
-        if events.is_empty() {
+    pub fn update(
+        &mut self, text_events: &[TextEvent], disappear_events: &[DisappearEvent], screen: &Screen, run: &EventRun, disappear_run: &DisappearRun,
+    ) -> bool {
+        if text_events.is_empty() && disappear_events.is_empty() {
             let changed = self.active;
             self.active = false;
-            self.last.clear();
+            self.last_text.clear();
+            self.last_disappear.clear();
             self.title.clear();
             self.live = 0;
             return changed;
         }
 
         self.active = true;
-        self.last.resize_with(events.len(), Vec::new);
+        self.last_text.resize_with(text_events.len(), Vec::new);
+        self.last_disappear.resize_with(disappear_events.len(), Vec::new);
 
-        let multiple = events.len() > 1;
+        let multiple = text_events.len() + disappear_events.len() > 1;
         let mut changed = false;
         let mut live = 0;
 
-        for (idx, event) in events.iter().enumerate() {
+        for (idx, event) in text_events.iter().enumerate() {
             let samples = event.scan_samples(screen);
             live += samples.len();
+            let prefix = sample_prefix("#", idx, multiple);
+            append_samples(&mut self.lines, &mut self.last_text[idx], samples, &prefix, &mut changed);
+        }
 
-            let mut current = Vec::new();
-            for sample in samples {
-                let background = background_line(idx, &sample, multiple);
-                let attributes = attribute_line(idx, &sample, multiple);
-                let signature = format!("{background}\n{attributes}");
-                if current.contains(&signature) {
-                    continue;
-                }
-                if !self.last[idx].contains(&signature) {
-                    self.push(ScanLine { text: background, swatch: None });
-                    self.push(ScanLine { text: attributes, swatch: Some((sample.fg, sample.bg)) });
-                    changed = true;
-                }
-                current.push(signature);
-            }
-            self.last[idx] = current;
+        for (idx, event) in disappear_events.iter().enumerate() {
+            let samples = event.scan_samples(screen);
+            live += samples.len();
+            let prefix = sample_prefix("D", idx, multiple);
+            append_samples(&mut self.lines, &mut self.last_disappear[idx], samples, &prefix, &mut changed);
         }
 
         for outcome in &run.outcomes {
             match outcome {
                 EventOutcome::Fired { event } => {
-                    let Some(text_event) = events.get(*event) else { continue };
+                    let Some(text_event) = text_events.get(*event) else { continue };
                     let Some(action) = &text_event.action else { continue };
                     self.push(ScanLine { text: format!("FIRE {} {}", event_label(*event, text_event), action_label(action)), swatch: None });
                     self.fires += 1;
@@ -80,8 +77,8 @@ impl ScanState {
                 }
                 EventOutcome::Skipped { event, by } => {
                     let target_label =
-                        events.get(*event).map(|text_event| event_label(*event, text_event)).unwrap_or_else(|| format!("#{}", event + 1));
-                    let guard_label = events.get(*by).map(|text_event| event_label(*by, text_event)).unwrap_or_else(|| format!("#{}", by + 1));
+                        text_events.get(*event).map(|text_event| event_label(*event, text_event)).unwrap_or_else(|| format!("#{}", event + 1));
+                    let guard_label = text_events.get(*by).map(|text_event| event_label(*by, text_event)).unwrap_or_else(|| format!("#{}", by + 1));
                     self.push(ScanLine { text: format!("SKIP {target_label} <- {guard_label}"), swatch: None });
                     self.skips += 1;
                     changed = true;
@@ -89,10 +86,22 @@ impl ScanState {
             }
         }
 
-        let title = if events.len() == 1 {
-            format!("SCAN \"{}\" [{}] fire={} skip={}", events[0].input.content, live, self.fires, self.skips)
-        } else {
-            format!("SCAN {} events [{}] fire={} skip={}", events.len(), live, self.fires, self.skips)
+        for &event_idx in &disappear_run.fired {
+            let Some(event) = disappear_events.get(event_idx) else { continue };
+            let Some(action) = &event.action else { continue };
+            self.push(ScanLine { text: format!("FIRE {} {}", disappear_label(event_idx, event, multiple), action_label(action)), swatch: None });
+            self.fires += 1;
+            changed = true;
+        }
+
+        let title = match (text_events.len(), disappear_events.len()) {
+            (1, 0) => format!("SCAN \"{}\" [{}] fire={} skip={}", text_events[0].input.content, live, self.fires, self.skips),
+            (0, 1) => format!("SCAN disappear \"{}\" [{}] fire={}", disappear_events[0].input.content, live, self.fires),
+            (count, 0) => format!("SCAN {count} events [{}] fire={} skip={}", live, self.fires, self.skips),
+            (0, count) => format!("SCAN {count} disappear events [{}] fire={}", live, self.fires),
+            (text, disappear) => {
+                format!("SCAN {text} text + {disappear} disappear [{}] fire={} skip={}", live, self.fires, self.skips)
+            }
         };
         if title != self.title {
             self.title = title;
@@ -121,27 +130,49 @@ impl ScanState {
     }
 
     fn push(&mut self, line: ScanLine) {
-        self.lines.push_back(line);
-        while self.lines.len() > MAX_LINES {
-            self.lines.pop_front();
-        }
+        push_line(&mut self.lines, line);
     }
 }
 
-fn background_line(index: usize, sample: &ScanSample, multiple: bool) -> String {
-    let colors: Vec<String> = sample.backgrounds.iter().map(|color| color.to_yaml()).collect();
-    format!("{}background: [{}]", prefix(index, multiple), colors.join(", "))
+fn append_samples(lines: &mut VecDeque<ScanLine>, last: &mut Vec<String>, samples: Vec<ScanSample>, prefix: &str, changed: &mut bool) {
+    let mut current = Vec::new();
+    for sample in samples {
+        let background = background_line(prefix, &sample);
+        let attributes = attribute_line(prefix, &sample);
+        let signature = format!("{background}\n{attributes}");
+        if current.contains(&signature) {
+            continue;
+        }
+        if !last.contains(&signature) {
+            push_line(lines, ScanLine { text: background, swatch: None });
+            push_line(lines, ScanLine { text: attributes, swatch: Some((sample.fg, sample.bg)) });
+            *changed = true;
+        }
+        current.push(signature);
+    }
+    *last = current;
 }
 
-fn attribute_line(index: usize, sample: &ScanSample, multiple: bool) -> String {
+fn push_line(lines: &mut VecDeque<ScanLine>, line: ScanLine) {
+    lines.push_back(line);
+    while lines.len() > MAX_LINES {
+        lines.pop_front();
+    }
+}
+
+fn background_line(prefix: &str, sample: &ScanSample) -> String {
+    let colors: Vec<String> = sample.backgrounds.iter().map(|color| color.to_yaml()).collect();
+    format!("{prefix}background: [{}]", colors.join(", "))
+}
+
+fn attribute_line(prefix: &str, sample: &ScanSample) -> String {
     let match_state = match sample.background_ok {
         None => "any",
         Some(true) => "ok",
         Some(false) => "no",
     };
     format!(
-        "{}fg={} bg={} B{}D{}I{}U{}R{} {}",
-        prefix(index, multiple),
+        "{prefix}fg={} bg={} B{}D{}I{}U{}R{} {}",
         ColorSpec::from_terminal(sample.fg).display(),
         ColorSpec::from_terminal(sample.bg).display(),
         u8::from(sample.bold),
@@ -153,13 +184,21 @@ fn attribute_line(index: usize, sample: &ScanSample, multiple: bool) -> String {
     )
 }
 
-fn prefix(index: usize, multiple: bool) -> String {
-    if multiple { format!("#{} ", index + 1) } else { String::new() }
+fn sample_prefix(kind: &str, index: usize, multiple: bool) -> String {
+    if multiple { format!("{kind}{} ", index + 1) } else { String::new() }
 }
 
 fn event_label(index: usize, event: &TextEvent) -> String {
     match event.id.as_deref() {
         Some(id) => id.to_string(),
+        None => format!("#{}", index + 1),
+    }
+}
+
+fn disappear_label(index: usize, event: &DisappearEvent, multiple: bool) -> String {
+    match event.id.as_deref() {
+        Some(id) => id.to_string(),
+        None if multiple => format!("D{}", index + 1),
         None => format!("#{}", index + 1),
     }
 }

@@ -1,9 +1,18 @@
-use crate::events::{EventOutcome, EventRun, EventsConfig, TextEvent};
+use crate::events::{DisappearEvent, DisappearRun, EventOutcome, EventRun, EventsConfig, TextEvent};
 use crate::scan::ScanState;
 
 fn events(yaml: &str) -> Vec<TextEvent> {
     let config: EventsConfig = serde_yaml::from_str(yaml).expect("valid event config");
     config.on_text
+}
+
+fn disappear_events(yaml: &str) -> Vec<DisappearEvent> {
+    let config: EventsConfig = serde_yaml::from_str(yaml).expect("valid event config");
+    config.on_disappear
+}
+
+fn update_text(scan: &mut ScanState, events: &[TextEvent], screen: &vt100::Screen, run: &EventRun) -> bool {
+    scan.update(events, &[], screen, run, &DisappearRun::default())
 }
 
 fn fired(event: usize) -> EventRun {
@@ -31,7 +40,7 @@ on_text:
     let parser = screen("48;2;0;95;0", "foobar");
     let mut scan = ScanState::default();
 
-    assert!(scan.update(&events, parser.screen(), &EventRun::default()));
+    assert!(update_text(&mut scan, &events, parser.screen(), &EventRun::default()));
     assert!(scan.active());
     assert!(scan.title().contains("SCAN \"foobar\" [1]"));
 
@@ -55,9 +64,9 @@ on_text:
     let parser = screen("48;2;0;95;0", "foobar");
     let mut scan = ScanState::default();
 
-    assert!(scan.update(&events, parser.screen(), &EventRun::default()));
+    assert!(update_text(&mut scan, &events, parser.screen(), &EventRun::default()));
     let count = scan.lines().count();
-    assert!(!scan.update(&events, parser.screen(), &EventRun::default()));
+    assert!(!update_text(&mut scan, &events, parser.screen(), &EventRun::default()));
     assert_eq!(scan.lines().count(), count);
 }
 
@@ -77,8 +86,8 @@ on_text:
     let default = screen("0", "foobar");
     let mut scan = ScanState::default();
 
-    assert!(scan.update(&events, green.screen(), &EventRun::default()));
-    assert!(scan.update(&events, default.screen(), &EventRun::default()));
+    assert!(update_text(&mut scan, &events, green.screen(), &EventRun::default()));
+    assert!(update_text(&mut scan, &events, default.screen(), &EventRun::default()));
 
     let lines: Vec<String> = scan.lines().map(|line| line.text.clone()).collect();
     assert!(lines.iter().any(|line| line == "background: [\"#005f00\"]"));
@@ -101,7 +110,7 @@ on_text:
     let parser = screen("48;2;0;95;0", "foobar");
     let mut scan = ScanState::default();
 
-    assert!(scan.update(&events, parser.screen(), &fired(0)));
+    assert!(update_text(&mut scan, &events, parser.screen(), &fired(0)));
     assert!(scan.title().contains("fire=1"));
     assert!(scan.lines().any(|line| line.text == "FIRE #1 ENTER"));
 }
@@ -121,7 +130,7 @@ on_text:
     let parser = screen("0", "foobar");
     let mut scan = ScanState::default();
 
-    assert!(scan.update(&events, parser.screen(), &fired(0)));
+    assert!(update_text(&mut scan, &events, parser.screen(), &fired(0)));
     assert!(scan.lines().any(|line| line.text == "FIRE #1 ENTER sound=accept"));
 }
 
@@ -146,7 +155,7 @@ on_text:
     let mut scan = ScanState::default();
     let run = EventRun { outcomes: vec![EventOutcome::Skipped { event: 1, by: 0 }] };
 
-    assert!(scan.update(&events, parser.screen(), &run));
+    assert!(update_text(&mut scan, &events, parser.screen(), &run));
     assert!(scan.title().contains("skip=1"));
     assert!(scan.lines().any(|line| line.text == "SKIP allow-once <- deny-script"));
 }
@@ -169,7 +178,7 @@ on_text:
     let parser = screen("48;2;0;95;0", "foobar baz");
     let mut scan = ScanState::default();
 
-    assert!(scan.update(&events, parser.screen(), &EventRun::default()));
+    assert!(update_text(&mut scan, &events, parser.screen(), &EventRun::default()));
     assert!(scan.title().contains("SCAN 2 events"));
 
     let lines: Vec<String> = scan.lines().map(|line| line.text.clone()).collect();
@@ -192,9 +201,9 @@ on_text:
     let absent = screen("0", "nothing");
     let mut scan = ScanState::default();
 
-    assert!(scan.update(&events, present.screen(), &EventRun::default()));
+    assert!(update_text(&mut scan, &events, present.screen(), &EventRun::default()));
     let count = scan.lines().count();
-    assert!(scan.update(&events, absent.screen(), &EventRun::default()));
+    assert!(update_text(&mut scan, &events, absent.screen(), &EventRun::default()));
     assert!(scan.title().contains("[0]"));
     assert_eq!(scan.lines().count(), count);
 }
@@ -213,8 +222,29 @@ on_text:
     let parser = screen("0", "foobar");
     let mut scan = ScanState::default();
 
-    assert!(scan.update(&events, parser.screen(), &EventRun::default()));
+    assert!(update_text(&mut scan, &events, parser.screen(), &EventRun::default()));
     assert!(scan.active());
-    assert!(scan.update(&[], parser.screen(), &EventRun::default()));
+    assert!(scan.update(&[], &[], parser.screen(), &EventRun::default(), &DisappearRun::default()));
     assert!(!scan.active());
+}
+
+#[test]
+fn logs_disappear_fire_outcomes() {
+    let events = disappear_events(
+        r#"
+on_disappear:
+  input:
+    content: "Thinking ..."
+  timeout: 10
+  action:
+    sound: tada
+"#,
+    );
+    let parser = screen("0", "nothing");
+    let mut scan = ScanState::default();
+    let run = DisappearRun { fired: vec![0] };
+
+    assert!(scan.update(&[], &events, parser.screen(), &EventRun::default(), &run));
+    assert!(scan.title().contains("SCAN disappear"));
+    assert!(scan.lines().any(|line| line.text == "FIRE #1 sound=tada"));
 }
