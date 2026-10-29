@@ -9,6 +9,8 @@ mod terminal;
 mod workspace;
 
 #[cfg(test)]
+mod config_ut;
+#[cfg(test)]
 mod terminal_ut;
 
 use compositor::{MenuState, Mode};

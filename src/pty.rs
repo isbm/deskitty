@@ -1,5 +1,6 @@
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 use std::io::{self, Read, Write};
+use std::path::Path;
 
 /// A pseudo-terminal with an attached child process.
 ///
@@ -14,13 +15,17 @@ pub struct Pty {
 impl Pty {
     /// Spawn a child process connected to a new PTY of the given size.
     ///
-    /// `command[0]` is the program; `command[1..]` are arguments.
+    /// `command[0]` is the program; `command[1..]` are arguments. The child
+    /// starts in `cwd`, which must be an existing directory.
     /// The master fd is set to `O_NONBLOCK` so reads never block.
-    pub fn spawn(rows: u16, cols: u16, command: &[String]) -> anyhow::Result<Self> {
+    pub fn spawn(rows: u16, cols: u16, command: &[String], cwd: &Path) -> anyhow::Result<Self> {
+        anyhow::ensure!(cwd.is_dir(), "working directory does not exist or is not a directory: {}", cwd.display());
+
         let pty_system = native_pty_system();
         let pair = pty_system.openpty(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })?;
 
         let mut cmd = CommandBuilder::new(&command[0]);
+        cmd.cwd(cwd);
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
         cmd.env("TERM_PROGRAM", "deskitty");

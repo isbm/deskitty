@@ -1,4 +1,7 @@
 use std::io;
+use std::path::PathBuf;
+
+use anyhow::Context;
 
 use crate::config::TabConfig;
 use crate::proc::ProcStat;
@@ -13,6 +16,7 @@ pub struct Tab {
     pub name: String,
     pub shortcut: char,
     pub command: Vec<String>,
+    pub cwd: PathBuf,
     pub pty: Option<pty::Pty>,
     pub terminal: terminal::Terminal,
     pub proc_stat: Option<ProcStat>,
@@ -27,12 +31,14 @@ pub struct Workspace {
 impl Workspace {
     /// Spawn every tab from the config. The first tab marked `default` becomes active.
     pub fn spawn_all(tab_configs: &[TabConfig], rows: u16, cols: u16) -> anyhow::Result<Self> {
+        let launch_dir = std::env::current_dir().context("resolving launch directory")?;
         let mut tabs = Vec::new();
         for tc in tab_configs {
-            let pty = pty::Pty::spawn(rows, cols, &tc.command)?;
+            let cwd = tc.resolved_cwd().unwrap_or_else(|| launch_dir.clone());
+            let pty = pty::Pty::spawn(rows, cols, &tc.command, &cwd).with_context(|| format!("spawning tab '{}'", tc.name))?;
             let proc_stat = pty.process_id().map(ProcStat::new);
             let terminal = terminal::Terminal::new(rows, cols);
-            tabs.push(Tab { name: tc.name.clone(), shortcut: tc.shortcut, command: tc.command.clone(), pty: Some(pty), terminal, proc_stat });
+            tabs.push(Tab { name: tc.name.clone(), shortcut: tc.shortcut, command: tc.command.clone(), cwd, pty: Some(pty), terminal, proc_stat });
         }
 
         let active = tab_configs.iter().position(|t| t.default).unwrap_or(0);
@@ -132,7 +138,8 @@ impl Workspace {
     /// Re-launch a previously closed tab.
     pub fn relaunch(&mut self, idx: usize, rows: u16, cols: u16) -> anyhow::Result<()> {
         let tab = &mut self.tabs[idx];
-        tab.pty = Some(pty::Pty::spawn(rows, cols, &tab.command)?);
+        let pty = pty::Pty::spawn(rows, cols, &tab.command, &tab.cwd).with_context(|| format!("relaunching tab '{}'", tab.name))?;
+        tab.pty = Some(pty);
         tab.proc_stat = tab.pty.as_ref().and_then(|p| p.process_id()).map(ProcStat::new);
         tab.terminal = terminal::Terminal::new(rows, cols);
         Ok(())
