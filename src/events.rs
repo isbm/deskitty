@@ -197,6 +197,18 @@ impl TextEvent {
     /// Matching works across wrapped rows within the visible screen. Explicit
     /// newlines in `content` are not supported.
     pub fn match_count(&self, screen: &Screen) -> usize {
+        self.input.match_count(screen)
+    }
+
+    /// Sample every visible content match for debug scanning.
+    pub(crate) fn scan_samples(&self, screen: &Screen) -> Vec<ScanSample> {
+        self.input.scan_samples(screen)
+    }
+}
+
+impl TextInput {
+    /// Count visible occurrences that satisfy the text and background filters.
+    pub fn match_count(&self, screen: &Screen) -> usize {
         self.match_windows(screen).iter().filter(|window| self.background_matches(screen, window)).count()
     }
 
@@ -209,7 +221,7 @@ impl TextEvent {
     }
 
     fn match_windows(&self, screen: &Screen) -> Vec<Vec<ScreenChar>> {
-        let needle: Vec<char> = self.input.content.chars().collect();
+        let needle: Vec<char> = self.content.chars().collect();
         if needle.is_empty() {
             return Vec::new();
         }
@@ -258,7 +270,7 @@ impl TextEvent {
             }
         }
 
-        let background_ok = if self.input.background.is_empty() { None } else { Some(self.background_matches(screen, window)) };
+        let background_ok = if self.background.is_empty() { None } else { Some(self.background_matches(screen, window)) };
         Some(ScanSample {
             fg: cell.fgcolor(),
             bg: cell.bgcolor(),
@@ -273,14 +285,14 @@ impl TextEvent {
     }
 
     fn background_matches(&self, screen: &Screen, window: &[ScreenChar]) -> bool {
-        if self.input.background.is_empty() {
+        if self.background.is_empty() {
             return true;
         }
 
         window
             .iter()
             .filter(|cell| !cell.ch.is_whitespace())
-            .all(|cell| screen.cell(cell.row, cell.col).is_some_and(|cell| self.input.background.iter().any(|spec| spec.matches(effective_bg(cell)))))
+            .all(|cell| screen.cell(cell.row, cell.col).is_some_and(|cell| self.background.iter().any(|spec| spec.matches(effective_bg(cell)))))
     }
 }
 
