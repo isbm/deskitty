@@ -39,7 +39,7 @@ fn run() -> Result<(), String> {
     }
 
     let cfg_path = matches.get_one::<String>("config").map(|s| s.as_str());
-    let cfg = config::load(cfg_path);
+    let cfg = config::load(cfg_path).map_err(|err| format!("{err:#}"))?;
 
     let mut stdout = io::stdout();
     stdout.execute(crossterm::terminal::EnterAlternateScreen).map_err(|e| e.to_string())?;

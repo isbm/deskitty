@@ -1,3 +1,4 @@
+use anyhow::Context;
 use serde::Deserialize;
 use std::ffi::OsStr;
 use std::path::{Component, Path, PathBuf};
@@ -15,6 +16,11 @@ pub struct TabConfig {
     pub name: String,
     pub shortcut: char,
     pub command: Vec<String>,
+    /// Working directory for the tab's program.
+    ///
+    /// Relative paths resolve from the directory deskitty was launched in,
+    /// and a leading `~` expands to `$HOME`. When omitted, the launch
+    /// directory is used.
     #[serde(default)]
     pub cwd: Option<PathBuf>,
     #[serde(default)]
@@ -22,6 +28,9 @@ pub struct TabConfig {
 }
 
 impl TabConfig {
+    /// Resolve the configured working directory, expanding a leading `~`.
+    ///
+    /// Returns `None` when the tab should use deskitty's launch directory.
     pub fn resolved_cwd(&self) -> Option<PathBuf> {
         self.cwd.as_ref().map(|path| match std::env::var_os("HOME") {
             Some(home) => expand_tilde(path, Path::new(&home)),
@@ -30,6 +39,10 @@ impl TabConfig {
     }
 }
 
+/// Expand a leading `~` component of `path` using `home`.
+///
+/// Paths without a leading `~` are returned unchanged. A leading `~user`
+/// component is not expanded.
 pub(crate) fn expand_tilde(path: &Path, home: &Path) -> PathBuf {
     let mut components = path.components();
     let Some(Component::Normal(first)) = components.next() else {
@@ -45,30 +58,39 @@ pub(crate) fn expand_tilde(path: &Path, home: &Path) -> PathBuf {
 
 /// Load config from the given path, falling back to
 /// `~/.config/deskitty/config.yaml`, and finally to a single `bash` tab.
-pub fn load(path: Option<&str>) -> Config {
-    if let Some(p) = path
-        && let Ok(cfg) = load_from_path(&PathBuf::from(p))
-        && !cfg.tabs.is_empty()
-    {
-        return cfg;
+///
+/// A malformed config is reported as an error instead of being silently
+/// replaced by the default tab, so event and keystroke typos are visible.
+pub fn load(path: Option<&str>) -> anyhow::Result<Config> {
+    if let Some(path) = path {
+        return load_with_default_tab(Path::new(path));
     }
 
     let home = std::env::var("HOME").unwrap_or_default();
     let default_path = PathBuf::from(home).join(".config/deskitty/config.yaml");
-    if let Ok(cfg) = load_from_path(&default_path)
-        && !cfg.tabs.is_empty()
-    {
-        return cfg;
+    if default_path.is_file() {
+        return load_with_default_tab(&default_path);
     }
 
-    default_config()
+    Ok(default_config())
 }
 
-fn load_from_path(path: &PathBuf) -> anyhow::Result<Config> {
-    let content = std::fs::read_to_string(path)?;
-    Ok(serde_yaml::from_str(&content)?)
+fn load_with_default_tab(path: &Path) -> anyhow::Result<Config> {
+    let mut config = load_from_path(path)?;
+    if config.tabs.is_empty() {
+        config.tabs = default_config().tabs;
+    }
+    Ok(config)
+}
+
+fn load_from_path(path: &Path) -> anyhow::Result<Config> {
+    let content = std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+    let config: Config = serde_yaml::from_str(&content).with_context(|| format!("parsing {}", path.display()))?;
+    Ok(config)
 }
 
 fn default_config() -> Config {
-    Config { tabs: vec![TabConfig { name: "Shell".to_string(), shortcut: 's', command: vec!["bash".to_string()], cwd: None, default: true }] }
+    Config {
+        tabs: vec![TabConfig { name: "Shell".to_string(), shortcut: 's', command: vec!["bash".to_string()], cwd: None, default: true }],
+    }
 }
