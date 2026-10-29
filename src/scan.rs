@@ -1,5 +1,6 @@
-use crate::events::{ColorSpec, DisappearEvent, DisappearRun, EventAction, EventOutcome, EventRun, ScanSample, TextEvent};
+use crate::events::{ColorSpec, DisappearEvent, DisappearRun, DisappearStatus, EventAction, EventOutcome, EventRun, ScanSample, TextEvent};
 use std::collections::VecDeque;
+use std::time::Duration;
 use vt100::Screen;
 
 const MAX_LINES: usize = 128;
@@ -44,6 +45,7 @@ impl ScanState {
             return changed;
         }
 
+        let starting = !self.active;
         self.active = true;
         self.last_text.resize_with(text_events.len(), Vec::new);
         self.last_disappear.resize_with(disappear_events.len(), Vec::new);
@@ -51,6 +53,13 @@ impl ScanState {
         let multiple = text_events.len() + disappear_events.len() > 1;
         let mut changed = false;
         let mut live = 0;
+
+        if starting {
+            for (idx, event) in disappear_events.iter().enumerate() {
+                self.push(ScanLine { text: format!("WAIT {} \"{}\"", disappear_label(idx, event, multiple), event.input.content), swatch: None });
+            }
+            changed |= !disappear_events.is_empty();
+        }
 
         for (idx, event) in text_events.iter().enumerate() {
             let samples = event.scan_samples(screen);
@@ -86,11 +95,22 @@ impl ScanState {
             }
         }
 
-        for &event_idx in &disappear_run.fired {
-            let Some(event) = disappear_events.get(event_idx) else { continue };
-            let Some(action) = &event.action else { continue };
-            self.push(ScanLine { text: format!("FIRE {} {}", disappear_label(event_idx, event, multiple), action_label(action)), swatch: None });
-            self.fires += 1;
+        for trace in &disappear_run.traces {
+            let Some(event) = disappear_events.get(trace.event) else { continue };
+            let label = disappear_label(trace.event, event, multiple);
+            let line = match trace.status {
+                DisappearStatus::Tracking => format!("TRACK {label}"),
+                DisappearStatus::Timeout => format!("TIMEOUT {label} {}", duration_label(event.timeout)),
+                DisappearStatus::Cancelled => format!("CANCEL {label}"),
+                DisappearStatus::Fired => {
+                    let action = event.action.as_ref().map(action_label).unwrap_or_else(|| "no action".to_string());
+                    format!("FIRE {label} {action}")
+                }
+            };
+            self.push(ScanLine { text: line, swatch: None });
+            if trace.status == DisappearStatus::Fired {
+                self.fires += 1;
+            }
             changed = true;
         }
 
@@ -201,6 +221,11 @@ fn disappear_label(index: usize, event: &DisappearEvent, multiple: bool) -> Stri
         None if multiple => format!("D{}", index + 1),
         None => format!("#{}", index + 1),
     }
+}
+
+fn duration_label(duration: Duration) -> String {
+    let seconds = duration.as_secs_f64();
+    if seconds.fract() == 0.0 { format!("{}s", seconds as u64) } else { format!("{seconds}s") }
 }
 
 fn action_label(action: &EventAction) -> String {

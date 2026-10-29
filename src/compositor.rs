@@ -335,7 +335,7 @@ fn draw_notice_button(buf: &mut Buffer, area: Rect, label: &str) {
 
 fn render_scan_overlay(f: &mut Frame, area: Rect, scan: &ScanState) {
     let width = 50.min(area.width.saturating_sub(5));
-    let height = 5.min(area.height.saturating_sub(2));
+    let height = 10.min(area.height.saturating_sub(2));
     if width < 10 || height < 2 {
         return;
     }

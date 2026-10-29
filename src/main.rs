@@ -129,7 +129,7 @@ fn run() -> Result<(), String> {
                         sounds.play(sound);
                     }
                 }
-                for &event in &disappear_run.fired {
+                for event in disappear_run.fired() {
                     if let Some(action) = &cfg.events.on_disappear[event].action
                         && let Some(sound) = &action.sound
                     {

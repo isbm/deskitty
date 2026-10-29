@@ -1,4 +1,7 @@
-use crate::events::{ColorSpec, DisappearGate, EventOutcome, EventsConfig, Keystroke, MatchGate, NamedColor, SETTLE, evaluate_events};
+use crate::events::{
+    ColorSpec, DisappearGate, DisappearStatus, EventOutcome, EventsConfig, Keystroke, MatchGate, NamedColor, SETTLE, evaluate_disappear_events,
+    evaluate_events,
+};
 use std::time::{Duration, Instant};
 
 const EVENT_YAML: &str = r#"
@@ -707,17 +710,17 @@ fn disappear_gate_fires_after_timeout_and_rearms() {
     let timeout = Duration::from_secs(10);
     let start = Instant::now();
 
-    assert!(!gate.update(1, start, timeout));
-    assert!(!gate.update(0, start + Duration::from_secs(1), timeout));
-    assert!(!gate.update(1, start + Duration::from_secs(5), timeout));
-    assert!(!gate.update(0, start + Duration::from_secs(6), timeout));
-    assert!(!gate.update(0, start + Duration::from_secs(15), timeout));
-    assert!(gate.update(0, start + Duration::from_secs(16), timeout));
-    assert!(!gate.update(0, start + Duration::from_secs(30), timeout));
+    assert_eq!(gate.update(1, start, timeout), Some(DisappearStatus::Tracking));
+    assert_eq!(gate.update(0, start + Duration::from_secs(1), timeout), Some(DisappearStatus::Timeout));
+    assert_eq!(gate.update(1, start + Duration::from_secs(5), timeout), Some(DisappearStatus::Cancelled));
+    assert_eq!(gate.update(0, start + Duration::from_secs(6), timeout), Some(DisappearStatus::Timeout));
+    assert_eq!(gate.update(0, start + Duration::from_secs(15), timeout), None);
+    assert_eq!(gate.update(0, start + Duration::from_secs(16), timeout), Some(DisappearStatus::Fired));
+    assert_eq!(gate.update(0, start + Duration::from_secs(30), timeout), None);
 
-    assert!(!gate.update(1, start + Duration::from_secs(31), timeout));
-    assert!(!gate.update(0, start + Duration::from_secs(32), timeout));
-    assert!(gate.update(0, start + Duration::from_secs(42), timeout));
+    assert_eq!(gate.update(1, start + Duration::from_secs(31), timeout), Some(DisappearStatus::Tracking));
+    assert_eq!(gate.update(0, start + Duration::from_secs(32), timeout), Some(DisappearStatus::Timeout));
+    assert_eq!(gate.update(0, start + Duration::from_secs(42), timeout), Some(DisappearStatus::Fired));
 }
 
 #[test]
@@ -725,6 +728,34 @@ fn disappear_gate_ignores_unseen_content() {
     let mut gate = DisappearGate::default();
     let timeout = Duration::from_secs(1);
 
-    assert!(!gate.update(0, Instant::now(), timeout));
-    assert!(!gate.update(0, Instant::now() + Duration::from_secs(10), timeout));
+    assert_eq!(gate.update(0, Instant::now(), timeout), None);
+    assert_eq!(gate.update(0, Instant::now() + Duration::from_secs(10), timeout), None);
+}
+
+#[test]
+fn evaluate_disappear_reports_lifecycle() {
+    let events: EventsConfig = serde_yaml::from_str(
+        r#"
+on_disappear:
+  input:
+    content: "Thinking ..."
+  timeout: 5
+  action:
+    sound: tada
+"#,
+    )
+    .expect("valid config");
+    let mut gates = vec![DisappearGate::default()];
+    let start = Instant::now();
+
+    let run = evaluate_disappear_events(&events.on_disappear, &[1], &mut gates, start);
+    assert_eq!(run.traces[0].status, DisappearStatus::Tracking);
+    assert_eq!(run.fired().count(), 0);
+
+    let run = evaluate_disappear_events(&events.on_disappear, &[0], &mut gates, start + Duration::from_secs(1));
+    assert_eq!(run.traces[0].status, DisappearStatus::Timeout);
+
+    let run = evaluate_disappear_events(&events.on_disappear, &[0], &mut gates, start + Duration::from_secs(6));
+    assert_eq!(run.traces[0].status, DisappearStatus::Fired);
+    assert_eq!(run.fired().collect::<Vec<_>>(), vec![0]);
 }

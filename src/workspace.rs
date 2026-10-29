@@ -7,7 +7,8 @@ use anyhow::Context;
 
 use crate::config::TabConfig;
 use crate::events::{
-    DisappearEvent, DisappearGate, DisappearRun, EventAction, EventOutcome, EventRun, Keystroke, MatchGate, TextEvent, evaluate_events,
+    DisappearEvent, DisappearGate, DisappearRun, EventAction, EventOutcome, EventRun, Keystroke, MatchGate, TextEvent, evaluate_disappear_events,
+    evaluate_events,
 };
 use crate::proc::ProcStat;
 use crate::pty;
@@ -198,25 +199,17 @@ impl Workspace {
 
         let now = Instant::now();
         let counts: Vec<usize> = events.iter().map(|event| event.match_count(tab.terminal.screen())).collect();
-        let mut fired = Vec::new();
-        for (event_idx, event) in events.iter().enumerate() {
-            if self.disappear_gates[idx][event_idx].update(counts[event_idx], now, event.timeout) {
-                let has_action = event.action.as_ref().is_some_and(|action| !action.keystroke.is_empty() || action.sound.is_some());
-                if has_action {
-                    fired.push(event_idx);
-                }
-            }
-        }
+        let run = evaluate_disappear_events(events, &counts, &mut self.disappear_gates[idx], now);
 
         if mode == ActionMode::Active {
-            for &event_idx in &fired {
+            for event_idx in run.fired() {
                 if let Some(action) = &events[event_idx].action {
                     self.enqueue_action(idx, action, now);
                 }
             }
         }
 
-        Ok(DisappearRun { fired })
+        Ok(run)
     }
 
     fn sync_event_gates(&mut self, event_count: usize) {

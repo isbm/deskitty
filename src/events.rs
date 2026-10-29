@@ -783,10 +783,49 @@ fn parse_keystroke(raw: &str) -> Option<KeyEvent> {
     Some(event)
 }
 
-/// Indices of `on_disappear` rules that fired this tick.
+/// A lifecycle change observed for one `on_disappear` rule.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DisappearStatus {
+    /// The input became visible and the rule is armed.
+    Tracking,
+    /// The input disappeared and the timeout started.
+    Timeout,
+    /// The input reappeared before the timeout elapsed.
+    Cancelled,
+    /// The timeout elapsed.
+    Fired,
+}
+
+/// One `on_disappear` lifecycle change from the current tick.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DisappearTrace {
+    pub event: usize,
+    pub status: DisappearStatus,
+}
+
+/// Lifecycle changes for `on_disappear` rules during one tick.
 #[derive(Debug, Default)]
 pub struct DisappearRun {
-    pub fired: Vec<usize>,
+    pub traces: Vec<DisappearTrace>,
+}
+
+impl DisappearRun {
+    /// Indices of rules whose timeout elapsed this tick.
+    pub fn fired(&self) -> impl Iterator<Item = usize> + '_ {
+        self.traces.iter().filter_map(|trace| (trace.status == DisappearStatus::Fired).then_some(trace.event))
+    }
+}
+
+/// Evaluate `on_disappear` rules, updating their gates.
+pub fn evaluate_disappear_events(events: &[DisappearEvent], counts: &[usize], gates: &mut [DisappearGate], now: Instant) -> DisappearRun {
+    let mut run = DisappearRun::default();
+    for (idx, event) in events.iter().enumerate() {
+        let count = counts.get(idx).copied().unwrap_or(0);
+        if let Some(status) = gates[idx].update(count, now, event.timeout) {
+            run.traces.push(DisappearTrace { event: idx, status });
+        }
+    }
+    run
 }
 
 /// Per-tab, per-rule disappearance state.
@@ -809,38 +848,43 @@ enum DisappearState {
 impl DisappearGate {
     /// Feed the current match count.
     ///
-    /// Returns `true` once when a previously visible input has been absent for
-    /// at least `timeout`.
-    pub fn update(&mut self, count: usize, now: Instant, timeout: Duration) -> bool {
+    /// Returns the lifecycle change caused by this observation, if any.
+    pub fn update(&mut self, count: usize, now: Instant, timeout: Duration) -> Option<DisappearStatus> {
         match self.state {
             DisappearState::Waiting => {
                 if count > 0 {
                     self.state = DisappearState::Visible;
+                    Some(DisappearStatus::Tracking)
+                } else {
+                    None
                 }
-                false
             }
             DisappearState::Visible => {
                 if count == 0 {
                     self.state = DisappearState::Missing { since: now };
+                    Some(DisappearStatus::Timeout)
+                } else {
+                    None
                 }
-                false
             }
             DisappearState::Missing { since } => {
                 if count > 0 {
                     self.state = DisappearState::Visible;
-                    false
+                    Some(DisappearStatus::Cancelled)
                 } else if now.saturating_duration_since(since) >= timeout {
                     self.state = DisappearState::Fired;
-                    true
+                    Some(DisappearStatus::Fired)
                 } else {
-                    false
+                    None
                 }
             }
             DisappearState::Fired => {
                 if count > 0 {
                     self.state = DisappearState::Visible;
+                    Some(DisappearStatus::Tracking)
+                } else {
+                    None
                 }
-                false
             }
         }
     }

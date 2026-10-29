@@ -1,4 +1,4 @@
-use crate::events::{DisappearEvent, DisappearRun, EventOutcome, EventRun, EventsConfig, TextEvent};
+use crate::events::{DisappearEvent, DisappearRun, DisappearStatus, DisappearTrace, EventOutcome, EventRun, EventsConfig, TextEvent};
 use crate::scan::ScanState;
 
 fn events(yaml: &str) -> Vec<TextEvent> {
@@ -96,7 +96,7 @@ on_text:
 }
 
 #[test]
-fn logs_would_fire_events_without_sending_them() {
+fn logs_fired_events() {
     let events = events(
         r#"
 on_text:
@@ -242,9 +242,44 @@ on_disappear:
     );
     let parser = screen("0", "nothing");
     let mut scan = ScanState::default();
-    let run = DisappearRun { fired: vec![0] };
+    let run = DisappearRun { traces: vec![DisappearTrace { event: 0, status: DisappearStatus::Fired }] };
 
     assert!(scan.update(&[], &events, parser.screen(), &EventRun::default(), &run));
     assert!(scan.title().contains("SCAN disappear"));
     assert!(scan.lines().any(|line| line.text == "FIRE #1 sound=tada"));
+}
+
+#[test]
+fn logs_disappear_lifecycle() {
+    let events = disappear_events(
+        r#"
+on_disappear:
+  id: "agent-finished"
+  input:
+    content: "Thinking ..."
+  timeout: 10
+  action:
+    sound: tada
+"#,
+    );
+    let parser = screen("0", "nothing");
+    let mut scan = ScanState::default();
+    let run = DisappearRun {
+        traces: vec![
+            DisappearTrace { event: 0, status: DisappearStatus::Tracking },
+            DisappearTrace { event: 0, status: DisappearStatus::Timeout },
+            DisappearTrace { event: 0, status: DisappearStatus::Cancelled },
+            DisappearTrace { event: 0, status: DisappearStatus::Fired },
+        ],
+    };
+
+    assert!(scan.update(&[], &events, parser.screen(), &EventRun::default(), &run));
+
+    let lines: Vec<String> = scan.lines().map(|line| line.text.clone()).collect();
+    assert!(lines.iter().any(|line| line == "WAIT agent-finished \"Thinking ...\""));
+    assert!(lines.iter().any(|line| line == "TRACK agent-finished"));
+    assert!(lines.iter().any(|line| line == "TIMEOUT agent-finished 10s"));
+    assert!(lines.iter().any(|line| line == "CANCEL agent-finished"));
+    assert!(lines.iter().any(|line| line == "FIRE agent-finished sound=tada"));
+    assert!(scan.title().contains("fire=1"));
 }
