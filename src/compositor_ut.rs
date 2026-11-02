@@ -1,5 +1,10 @@
-use crate::compositor::{MenuItem, MenuOptions, MenuState, key_to_bytes};
+use crate::compositor::{MenuItem, MenuOptions, MenuState, Mode, Notice, key_to_bytes, render};
+use crate::scan::ScanState;
+use crate::terminal::Terminal;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::backend::CrosstermBackend;
+use ratatui::layout::Rect;
+use ratatui::{TerminalOptions, Viewport};
 
 fn options() -> MenuOptions {
     MenuOptions { actions_stopped: false, show_desktop: true }
@@ -120,5 +125,88 @@ fn unmodified_keys_preserve_csi_and_application_ss3() {
             assert_eq!(key_to_bytes(&KeyEvent::new(code, KeyModifiers::NONE), app_cursor), Some(expected.as_bytes().to_vec()));
         }
         assert_eq!(key_to_bytes(&KeyEvent::new(KeyCode::F(13), KeyModifiers::CONTROL), app_cursor), None);
+    }
+}
+
+// Capture the actual backend bytes, including Show/Hide and final MoveTo, not
+// just the rendered cell buffer. A fixed viewport avoids querying a real TTY.
+fn draw_cursor(terminal: &Terminal, desktop: bool, mode: &Mode, scan: &ScanState, area: Rect) -> vt100::Parser {
+    let backend = CrosstermBackend::new(Vec::new());
+    let mut renderer = ratatui::Terminal::with_options(backend, TerminalOptions { viewport: Viewport::Fixed(area) }).unwrap();
+    renderer.draw(|frame| render(frame, terminal.screen(), &[], 0, mode, None, false, desktop, scan)).unwrap();
+    let mut host = vt100::Parser::new(40, 100, 0);
+    host.process(renderer.backend().writer());
+    host
+}
+
+#[test]
+fn cursor_stays_visible_at_pending_wrap_and_tracks_next_character() {
+    for desktop in [false, true] {
+        let area = if desktop { Rect::new(0, 0, 12, 7) } else { Rect::new(0, 0, 10, 4) };
+        let offset = u16::from(desktop);
+        let mut terminal = Terminal::new(4, 10);
+        terminal.process(b"1234567890");
+        assert_eq!(terminal.screen().cursor_position(), (0, 10), "vt100 pending wrap");
+        let host = draw_cursor(&terminal, desktop, &Mode::Normal, &ScanState::default(), area);
+        assert!(!host.screen().hide_cursor(), "visible child cursor must not become backend Hide at the right margin");
+        assert_eq!(host.screen().cursor_position(), (offset, 9 + offset));
+        terminal.process(b"x");
+        let host = draw_cursor(&terminal, desktop, &Mode::Normal, &ScanState::default(), area);
+        assert!(!host.screen().hide_cursor());
+        assert_eq!(host.screen().cursor_position(), (1 + offset, 1 + offset));
+    }
+}
+
+#[test]
+fn cursor_tracks_typing_movement_and_child_visibility() {
+    let mut terminal = Terminal::new(20, 78);
+    let area = Rect::new(0, 0, 80, 23);
+    for (bytes, position, hidden) in [
+        (b"abc".as_slice(), (1, 4), false),
+        (b"\x1b[4;7H".as_slice(), (4, 7), false),
+        (b"\x1b[?25l".as_slice(), (4, 7), true),
+        (b"\x1b[?25h\x1b[2D".as_slice(), (4, 5), false),
+    ] {
+        terminal.process(bytes);
+        let host = draw_cursor(&terminal, true, &Mode::Normal, &ScanState::default(), area);
+        assert_eq!(host.screen().hide_cursor(), hidden);
+        if !hidden {
+            assert_eq!(host.screen().cursor_position(), position);
+        }
+    }
+}
+
+#[test]
+fn modal_windows_hide_child_cursor() {
+    let terminal = Terminal::new(20, 78);
+    for mode in [Mode::Command(MenuState::new(&[], options())), Mode::Notice(Notice::new("Notice", vec![]))] {
+        let host = draw_cursor(&terminal, true, &mode, &ScanState::default(), Rect::new(0, 0, 80, 23));
+        assert!(host.screen().hide_cursor());
+    }
+}
+
+#[test]
+fn scan_overlay_hides_only_the_cursor_it_covers() {
+    let mut terminal = Terminal::new(20, 78);
+    let events: crate::events::EventsConfig = serde_yaml::from_str("on_text:\n  input:\n    content: foobar\n").unwrap();
+    let mut scan = ScanState::default();
+    scan.update(&events.on_text, &[], terminal.screen(), &crate::events::EventRun::default(), &crate::events::DisappearRun::default());
+    assert!(scan.active());
+    for desktop in [false, true] {
+        for (bytes, hidden) in [(b"\x1b[2;30H".as_slice(), true), (b"\x1b[15;3H".as_slice(), false)] {
+            terminal.process(bytes);
+            let host = draw_cursor(&terminal, desktop, &Mode::Normal, &scan, Rect::new(0, 0, 80, 23));
+            assert_eq!(host.screen().hide_cursor(), hidden);
+        }
+    }
+}
+
+#[test]
+fn clipped_cursor_is_not_moved_into_the_visible_grid() {
+    let mut terminal = Terminal::new(20, 78);
+    terminal.process(b"\x1b[2;20H");
+    for area in [Rect::new(0, 0, 10, 4), Rect::new(0, 0, 0, 4), Rect::new(0, 0, 10, 0)] {
+        let host = draw_cursor(&terminal, false, &Mode::Normal, &ScanState::default(), area);
+        assert!(host.screen().hide_cursor());
     }
 }

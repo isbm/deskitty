@@ -218,7 +218,7 @@ pub fn render(
 ) {
     let area = f.area();
 
-    if show_desktop {
+    let grid_rect = if show_desktop {
         let border_stops =
             vec![Color::Rgb(255, 95, 135), Color::Rgb(135, 95, 255), Color::Rgb(0, 255, 255), Color::Rgb(135, 95, 255), Color::Rgb(255, 95, 135)];
         let corner_color = bottom_right_corner_color(area, &border_stops);
@@ -230,9 +230,11 @@ pub fn render(
 
         render_terminal_grid(f, grid_rect, screen);
         render_status_bar(f, status_rect, labels, active_idx, mode, sysinfo, corner_color, bg_active);
+        grid_rect
     } else {
         render_terminal_grid(f, area, screen);
-    }
+        area
+    };
 
     if scan.active() {
         render_scan_overlay(f, area, scan);
@@ -245,6 +247,25 @@ pub fn render(
     if let Mode::Notice(notice) = mode {
         render_notice(f, area, notice);
     }
+
+    if matches!(mode, Mode::Normal)
+        && let Some(position) = terminal_cursor_position(grid_rect, screen)
+        && !(scan.active() && scan_overlay_rect(area).is_some_and(|rect| rect.contains(position.into())))
+    {
+        f.set_cursor_position(position);
+    }
+}
+
+fn terminal_cursor_position(area: Rect, screen: &vt100::Screen) -> Option<(u16, u16)> {
+    let (rows, cols) = screen.size();
+    if screen.hide_cursor() || cols == 0 {
+        return None;
+    }
+    let (row, col) = screen.cursor_position();
+    // vt100 keeps col == cols while autowrap is pending. The physical cursor
+    // remains on the last cell until the next printable character wraps.
+    let col = if col == cols { cols - 1 } else { col };
+    if row < area.height.min(rows) && col < area.width.min(cols) { Some((area.x + col, area.y + row)) } else { None }
 }
 
 fn render_notice(f: &mut Frame, area: Rect, notice: &Notice) {
@@ -333,16 +354,20 @@ fn draw_notice_button(buf: &mut Buffer, area: Rect, label: &str) {
     }
 }
 
-fn render_scan_overlay(f: &mut Frame, area: Rect, scan: &ScanState) {
+fn scan_overlay_rect(area: Rect) -> Option<Rect> {
     let width = 50.min(area.width.saturating_sub(5));
     let height = 10.min(area.height.saturating_sub(2));
     if width < 10 || height < 2 {
-        return;
+        return None;
     }
 
     let x = area.x + area.width.saturating_sub(width + 4);
     let y = area.y + 1;
-    let rect = Rect::new(x, y, width, height);
+    Some(Rect::new(x, y, width, height))
+}
+
+fn render_scan_overlay(f: &mut Frame, area: Rect, scan: &ScanState) {
+    let Some(rect) = scan_overlay_rect(area) else { return };
     f.render_widget(Clear, rect);
 
     let block = Block::default()
@@ -432,11 +457,6 @@ fn render_terminal_grid(f: &mut Frame, area: Rect, screen: &vt100::Screen) {
                 col += 1;
             }
         }
-    }
-
-    let (cursor_row, cursor_col) = screen.cursor_position();
-    if cursor_row < max_rows && cursor_col < max_cols {
-        f.set_cursor_position((area.x + cursor_col, area.y + cursor_row));
     }
 }
 
