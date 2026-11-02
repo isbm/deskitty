@@ -78,3 +78,50 @@ fn show_desktop_defaults_true_and_parses_false() {
     let cfg = parse("show_desktop: false\n");
     assert!(!cfg.show_desktop);
 }
+
+#[test]
+fn default_invocations_select_config_yaml() {
+    let home = Path::new("/home/user");
+    for invocation in [None, Some(""), Some("deskitty"), Some("./deskitty"), Some("/usr/bin/deskitty")] {
+        assert_eq!(crate::config::selected_config_path(None, invocation.map(std::ffi::OsStr::new), home), home.join(".config/deskitty/config.yaml"),);
+    }
+}
+
+#[test]
+fn explicit_config_yaml_overrides_foobar_profile() {
+    assert_eq!(
+        crate::config::selected_config_path(Some("config.yaml"), Some(std::ffi::OsStr::new("foobar")), Path::new("/home/user")),
+        PathBuf::from("config.yaml"),
+    );
+}
+
+#[test]
+fn profile_invocations_select_basename_conf() {
+    let home = Path::new("/home/user");
+    for invocation in ["foobar", "./foobar", "/usr/local/bin/foobar"] {
+        assert_eq!(
+            crate::config::selected_config_path(None, Some(std::ffi::OsStr::new(invocation)), home),
+            home.join(".config/deskitty/foobar.conf"),
+        );
+    }
+}
+
+#[test]
+fn explicit_config_overrides_invocation_profile() {
+    for invocation in ["deskitty", "foobar"] {
+        assert_eq!(
+            crate::config::selected_config_path(Some("custom/settings.yaml"), Some(std::ffi::OsStr::new(invocation)), Path::new("/home/user")),
+            PathBuf::from("custom/settings.yaml"),
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn profile_names_preserve_non_utf8_bytes() {
+    use std::os::unix::ffi::OsStrExt;
+
+    let invocation = std::ffi::OsStr::from_bytes(b"/usr/bin/profile\xff");
+    let expected = Path::new("/home/user/.config/deskitty").join(std::ffi::OsStr::from_bytes(b"profile\xff.conf"));
+    assert_eq!(crate::config::selected_config_path(None, Some(invocation), Path::new("/home/user")), expected);
+}
