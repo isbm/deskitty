@@ -80,10 +80,10 @@ fn show_desktop_defaults_true_and_parses_false() {
 }
 
 #[test]
-fn default_invocations_select_config_yaml() {
+fn default_invocations_select_default_conf() {
     let home = Path::new("/home/user");
     for invocation in [None, Some(""), Some("deskitty"), Some("./deskitty"), Some("/usr/bin/deskitty")] {
-        assert_eq!(crate::config::selected_config_path(None, invocation.map(std::ffi::OsStr::new), home), home.join(".config/deskitty/config.yaml"),);
+        assert_eq!(crate::config::selected_config_path(None, invocation.map(std::ffi::OsStr::new), home), home.join(".config/deskitty/default.conf"),);
     }
 }
 

@@ -80,7 +80,7 @@ pub(crate) fn expand_tilde(path: &Path, home: &Path) -> PathBuf {
 
 /// Load an explicit config or the config selected by the invocation name.
 ///
-/// `deskitty` uses `~/.config/deskitty/config.yaml`; other invocation names
+/// `deskitty` uses `~/.config/deskitty/default.conf`; other invocation names
 /// use `~/.config/deskitty/<name>.conf`. Missing automatic configs start a
 /// single `bash` tab. Explicit paths and malformed configs report errors.
 pub fn load(path: Option<&str>, invocation: Option<&OsStr>) -> anyhow::Result<Config> {
@@ -106,7 +106,7 @@ pub(crate) fn selected_config_path(path: Option<&str>, invocation: Option<&OsStr
             filename.push(".conf");
             config_dir.join(filename)
         }
-        _ => config_dir.join("config.yaml"),
+        _ => config_dir.join("default.conf"),
     }
 }
 
