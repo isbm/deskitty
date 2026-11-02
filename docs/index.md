@@ -38,11 +38,13 @@ Without a configuration file, deskitty starts a single `bash` tab.
 To use a configuration file:
 
 ```sh
-./target/debug/deskitty -c ~/.config/deskitty/config.yaml
+./target/debug/deskitty -c ~/.config/deskitty/default.conf
 ```
 
-The default path is `~/.config/deskitty/config.yaml`, so passing `-c` is only
-needed for a different file.
+The default path is `~/.config/deskitty/default.conf`, so passing `-c` is only
+needed for a different file. The `.conf` file still contains YAML; explicit
+paths may use any extension. There is no automatic fallback to the legacy
+`config.yaml`.
 
 ## Controls
 

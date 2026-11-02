@@ -78,23 +78,36 @@ pub(crate) fn expand_tilde(path: &Path, home: &Path) -> PathBuf {
     if rest.as_os_str().is_empty() { home.to_path_buf() } else { home.join(rest) }
 }
 
-/// Load config from the given path, falling back to
-/// `~/.config/deskitty/config.yaml`, and finally to a single `bash` tab.
+/// Load an explicit config or the config selected by the invocation name.
 ///
-/// A malformed config is reported as an error instead of being silently
-/// replaced by the default tab, so event and keystroke typos are visible.
-pub fn load(path: Option<&str>) -> anyhow::Result<Config> {
-    if let Some(path) = path {
-        return load_with_default_tab(Path::new(path));
-    }
-
-    let home = std::env::var("HOME").unwrap_or_default();
-    let default_path = PathBuf::from(home).join(".config/deskitty/config.yaml");
-    if default_path.is_file() {
-        return load_with_default_tab(&default_path);
+/// `deskitty` uses `~/.config/deskitty/default.conf`; other invocation names
+/// use `~/.config/deskitty/<name>.conf`. Missing automatic configs start a
+/// single `bash` tab. Explicit paths and malformed configs report errors.
+pub fn load(path: Option<&str>, invocation: Option<&OsStr>) -> anyhow::Result<Config> {
+    let home = std::env::var_os("HOME").unwrap_or_default();
+    let config_path = selected_config_path(path, invocation, Path::new(&home));
+    if path.is_some() || config_path.is_file() {
+        return load_with_default_tab(&config_path);
     }
 
     Ok(default_config())
+}
+
+/// Choose a config using the original invocation, without resolving symlinks.
+pub(crate) fn selected_config_path(path: Option<&str>, invocation: Option<&OsStr>, home: &Path) -> PathBuf {
+    if let Some(path) = path {
+        return PathBuf::from(path);
+    }
+
+    let config_dir = home.join(".config/deskitty");
+    match invocation.and_then(|name| Path::new(name).file_name()) {
+        Some(name) if name != OsStr::new("deskitty") => {
+            let mut filename = name.to_os_string();
+            filename.push(".conf");
+            config_dir.join(filename)
+        }
+        _ => config_dir.join("default.conf"),
+    }
 }
 
 fn load_with_default_tab(path: &Path) -> anyhow::Result<Config> {

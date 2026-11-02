@@ -3,17 +3,37 @@
 Deskitty reads a YAML configuration file. The default path is:
 
 ```text
-~/.config/deskitty/config.yaml
+~/.config/deskitty/default.conf
 ```
 
-Use `-c` to load a different file:
+The `.conf` file still contains YAML. Use `-c` to load a different file; explicit
+paths may use any extension, including `.yaml`:
 
 ```sh
 deskitty -c path/to/config.yaml
 ```
 
-If the file does not exist, deskitty starts a single `bash` tab. A malformed
-configuration is reported as an error at startup.
+### Invocation-name profiles
+
+When launched under a different name, deskitty selects a profile using that
+name. For example, a symlink `foobar -> /usr/bin/deskitty` loads:
+
+```text
+~/.config/deskitty/foobar.conf
+```
+
+Profile files contain the same YAML configuration despite the `.conf` extension.
+Only the invocation's basename is used: `foobar`, `./foobar`, and
+`/usr/local/bin/foobar` all select `foobar.conf`. The symlink target is not used
+for profile selection. Launching as `deskitty` keeps the default `default.conf`.
+An explicit `-c` overrides profile selection, so `foobar -c config.yaml` loads
+`config.yaml` instead of `foobar.conf`.
+
+If the automatically selected file does not exist, deskitty starts a single
+`bash` tab; it does not fall back to another profile or `default.conf`. The legacy
+`~/.config/deskitty/config.yaml` is never loaded automatically; use `-c` to load
+it explicitly. A missing explicit `-c` file or malformed configuration is
+reported as an error at startup.
 
 ## Full example
 
