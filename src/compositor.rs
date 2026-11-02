@@ -218,7 +218,7 @@ pub fn render(
 ) {
     let area = f.area();
 
-    if show_desktop {
+    let grid_rect = if show_desktop {
         let border_stops =
             vec![Color::Rgb(255, 95, 135), Color::Rgb(135, 95, 255), Color::Rgb(0, 255, 255), Color::Rgb(135, 95, 255), Color::Rgb(255, 95, 135)];
         let corner_color = bottom_right_corner_color(area, &border_stops);
@@ -230,9 +230,11 @@ pub fn render(
 
         render_terminal_grid(f, grid_rect, screen);
         render_status_bar(f, status_rect, labels, active_idx, mode, sysinfo, corner_color, bg_active);
+        grid_rect
     } else {
         render_terminal_grid(f, area, screen);
-    }
+        area
+    };
 
     if scan.active() {
         render_scan_overlay(f, area, scan);
@@ -245,6 +247,25 @@ pub fn render(
     if let Mode::Notice(notice) = mode {
         render_notice(f, area, notice);
     }
+
+    if matches!(mode, Mode::Normal)
+        && let Some(position) = terminal_cursor_position(grid_rect, screen)
+        && !(scan.active() && scan_overlay_rect(area).is_some_and(|rect| rect.contains(position.into())))
+    {
+        f.set_cursor_position(position);
+    }
+}
+
+fn terminal_cursor_position(area: Rect, screen: &vt100::Screen) -> Option<(u16, u16)> {
+    let (rows, cols) = screen.size();
+    if screen.hide_cursor() || cols == 0 {
+        return None;
+    }
+    let (row, col) = screen.cursor_position();
+    // vt100 keeps col == cols while autowrap is pending. The physical cursor
+    // remains on the last cell until the next printable character wraps.
+    let col = if col == cols { cols - 1 } else { col };
+    if row < area.height.min(rows) && col < area.width.min(cols) { Some((area.x + col, area.y + row)) } else { None }
 }
 
 fn render_notice(f: &mut Frame, area: Rect, notice: &Notice) {
@@ -333,16 +354,20 @@ fn draw_notice_button(buf: &mut Buffer, area: Rect, label: &str) {
     }
 }
 
-fn render_scan_overlay(f: &mut Frame, area: Rect, scan: &ScanState) {
+fn scan_overlay_rect(area: Rect) -> Option<Rect> {
     let width = 50.min(area.width.saturating_sub(5));
     let height = 10.min(area.height.saturating_sub(2));
     if width < 10 || height < 2 {
-        return;
+        return None;
     }
 
     let x = area.x + area.width.saturating_sub(width + 4);
     let y = area.y + 1;
-    let rect = Rect::new(x, y, width, height);
+    Some(Rect::new(x, y, width, height))
+}
+
+fn render_scan_overlay(f: &mut Frame, area: Rect, scan: &ScanState) {
+    let Some(rect) = scan_overlay_rect(area) else { return };
     f.render_widget(Clear, rect);
 
     let block = Block::default()
@@ -432,11 +457,6 @@ fn render_terminal_grid(f: &mut Frame, area: Rect, screen: &vt100::Screen) {
                 col += 1;
             }
         }
-    }
-
-    let (cursor_row, cursor_col) = screen.cursor_position();
-    if cursor_row < max_rows && cursor_col < max_cols {
-        f.set_cursor_position((area.x + cursor_col, area.y + cursor_row));
     }
 }
 
@@ -615,35 +635,51 @@ pub fn key_to_bytes(key: &KeyEvent, app_cursor: bool) -> Option<Vec<u8>> {
         KeyCode::Backspace => Some(vec![0x7f]),
         KeyCode::Tab => Some(vec![b'\t']),
         KeyCode::Esc => Some(vec![0x1b]),
-        KeyCode::Up => if app_cursor { Some(b"\x1bOA".to_vec()) } else { Some(b"\x1b[A".to_vec()) },
-        KeyCode::Down => if app_cursor { Some(b"\x1bOB".to_vec()) } else { Some(b"\x1b[B".to_vec()) },
-        KeyCode::Right => if app_cursor { Some(b"\x1bOC".to_vec()) } else { Some(b"\x1b[C".to_vec()) },
-        KeyCode::Left => if app_cursor { Some(b"\x1bOD".to_vec()) } else { Some(b"\x1b[D".to_vec()) },
-        KeyCode::Home => if app_cursor { Some(b"\x1bOH".to_vec()) } else { Some(b"\x1b[H".to_vec()) },
-        KeyCode::End => if app_cursor { Some(b"\x1bOF".to_vec()) } else { Some(b"\x1b[F".to_vec()) },
-        KeyCode::PageUp => Some(b"\x1b[5~".to_vec()),
-        KeyCode::PageDown => Some(b"\x1b[6~".to_vec()),
-        KeyCode::Delete => Some(b"\x1b[3~".to_vec()),
-        KeyCode::Insert => Some(b"\x1b[2~".to_vec()),
-        KeyCode::F(n) => fn_key(n),
+        KeyCode::Up => Some(key_sequence(1, 'A', key.modifiers, app_cursor)),
+        KeyCode::Down => Some(key_sequence(1, 'B', key.modifiers, app_cursor)),
+        KeyCode::Right => Some(key_sequence(1, 'C', key.modifiers, app_cursor)),
+        KeyCode::Left => Some(key_sequence(1, 'D', key.modifiers, app_cursor)),
+        KeyCode::Home => Some(key_sequence(1, 'H', key.modifiers, app_cursor)),
+        KeyCode::End => Some(key_sequence(1, 'F', key.modifiers, app_cursor)),
+        KeyCode::PageUp => Some(key_sequence(5, '~', key.modifiers, false)),
+        KeyCode::PageDown => Some(key_sequence(6, '~', key.modifiers, false)),
+        KeyCode::Delete => Some(key_sequence(3, '~', key.modifiers, false)),
+        KeyCode::Insert => Some(key_sequence(2, '~', key.modifiers, false)),
+        KeyCode::F(n) => fn_key(n, key.modifiers),
         _ => None,
     }
 }
 
-fn fn_key(n: u8) -> Option<Vec<u8>> {
-    match n {
-        1 => Some(b"\x1bOP".to_vec()),
-        2 => Some(b"\x1bOQ".to_vec()),
-        3 => Some(b"\x1bOR".to_vec()),
-        4 => Some(b"\x1bOS".to_vec()),
-        5 => Some(b"\x1b[15~".to_vec()),
-        6 => Some(b"\x1b[17~".to_vec()),
-        7 => Some(b"\x1b[18~".to_vec()),
-        8 => Some(b"\x1b[19~".to_vec()),
-        9 => Some(b"\x1b[20~".to_vec()),
-        10 => Some(b"\x1b[21~".to_vec()),
-        11 => Some(b"\x1b[23~".to_vec()),
-        12 => Some(b"\x1b[24~".to_vec()),
-        _ => None,
+fn key_sequence(parameter: u8, suffix: char, modifiers: KeyModifiers, ss3: bool) -> Vec<u8> {
+    let modifier = 1
+        + u8::from(modifiers.contains(KeyModifiers::SHIFT))
+        + 2 * u8::from(modifiers.contains(KeyModifiers::ALT))
+        + 4 * u8::from(modifiers.contains(KeyModifiers::CONTROL));
+    if modifier > 1 {
+        format!("\x1b[{parameter};{modifier}{suffix}").into_bytes()
+    } else if suffix == '~' {
+        format!("\x1b[{parameter}~").into_bytes()
+    } else {
+        let prefix = if ss3 { 'O' } else { '[' };
+        format!("\x1b{prefix}{suffix}").into_bytes()
     }
+}
+
+fn fn_key(n: u8, modifiers: KeyModifiers) -> Option<Vec<u8>> {
+    let (parameter, suffix) = match n {
+        1 => (1, 'P'),
+        2 => (1, 'Q'),
+        3 => (1, 'R'),
+        4 => (1, 'S'),
+        5 => (15, '~'),
+        6 => (17, '~'),
+        7 => (18, '~'),
+        8 => (19, '~'),
+        9 => (20, '~'),
+        10 => (21, '~'),
+        11 => (23, '~'),
+        12 => (24, '~'),
+        _ => return None,
+    };
+    Some(key_sequence(parameter, suffix, modifiers, true))
 }
