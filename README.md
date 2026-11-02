@@ -34,7 +34,9 @@ make dev
 ```
 
 Without a configuration file, deskitty starts a single `bash` tab. The default
-config path is `~/.config/deskitty/config.yaml`; use `-c` for a different file.
+config path is `~/.config/deskitty/default.conf`; use `-c` for a different file.
+The `.conf` file still contains YAML. There is no automatic fallback to the
+legacy `config.yaml`; explicit paths may use any extension.
 
 ```sh
 ./target/debug/deskitty -c path/to/config.yaml
