@@ -61,3 +61,18 @@ fn normalizes_hvp_while_dec_graphics_is_active() {
 
     assert_eq!(terminal.screen().cell(1, 2).unwrap().contents(), "│");
 }
+
+#[test]
+fn tracks_application_cursor_mode_across_process_calls() {
+    let mut terminal = Terminal::new(1, 1);
+
+    terminal.process(b"\x1b[?");
+    terminal.process(b"1h");
+
+    assert!(terminal.application_cursor_keys());
+
+    terminal.process(b"\x1b[");
+    terminal.process(b"?1l");
+
+    assert!(!terminal.application_cursor_keys());
+}

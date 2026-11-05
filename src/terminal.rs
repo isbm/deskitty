@@ -15,6 +15,7 @@ pub struct Terminal {
     using_g1_charset: bool,
     escape_state: EscapeState,
     application_cursor_keys: bool,
+    cursor_mode_tail: Vec<u8>,
 }
 
 #[derive(Clone, Copy)]
@@ -38,6 +39,7 @@ impl Terminal {
             using_g1_charset: false,
             escape_state: EscapeState::Ground,
             application_cursor_keys: false,
+            cursor_mode_tail: Vec::new(),
         }
     }
 
@@ -48,8 +50,8 @@ impl Terminal {
     pub fn process(&mut self, bytes: &[u8]) {
         if bytes.contains(&0x1b) {
             self.handle_queries(bytes);
-            self.handle_cursor_mode(bytes);
         }
+        self.handle_cursor_mode(bytes);
         let translated = self.translate_dec_special_graphics(bytes);
         self.parser.process(&translated);
     }
@@ -65,12 +67,18 @@ impl Terminal {
     }
 
     fn handle_cursor_mode(&mut self, bytes: &[u8]) {
-        if bytes.windows(5).any(|w| w == b"\x1b[?1h") {
-            self.application_cursor_keys = true;
+        let mut sequence = std::mem::take(&mut self.cursor_mode_tail);
+        sequence.extend_from_slice(bytes);
+
+        for window in sequence.windows(5) {
+            match window {
+                b"\x1b[?1h" => self.application_cursor_keys = true,
+                b"\x1b[?1l" => self.application_cursor_keys = false,
+                _ => {}
+            }
         }
-        if bytes.windows(5).any(|w| w == b"\x1b[?1l") {
-            self.application_cursor_keys = false;
-        }
+
+        self.cursor_mode_tail = sequence.split_off(sequence.len().saturating_sub(4));
     }
 
     /// Resize the terminal grid after a window resize.
