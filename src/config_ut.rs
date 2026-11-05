@@ -1,8 +1,16 @@
-use crate::config::{Config, expand_tilde};
+use crate::config::{Config, expand_tilde, set_show_desktop};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 fn parse(yaml: &str) -> Config {
     serde_yaml::from_str(yaml).expect("valid config")
+}
+
+fn temporary_config_path() -> PathBuf {
+    static NEXT_TEST_FILE: AtomicUsize = AtomicUsize::new(0);
+
+    let suffix = NEXT_TEST_FILE.fetch_add(1, Ordering::Relaxed);
+    std::env::temp_dir().join(format!("deskitty-config-test-{}-{suffix}.conf", std::process::id()))
 }
 
 #[test]
@@ -77,6 +85,31 @@ fn show_desktop_defaults_true_and_parses_false() {
 
     let cfg = parse("show_desktop: false\n");
     assert!(!cfg.show_desktop);
+}
+
+#[test]
+fn persists_show_desktop_without_changing_other_settings() {
+    let path = temporary_config_path();
+    std::fs::write(&path, "tabs:\n  - name: Shell\n    shortcut: s\n    command: [bash]\nactions: false\nshow_desktop: true\n")
+        .expect("write config");
+
+    set_show_desktop(&path, false).expect("persist desktop setting");
+
+    let content = std::fs::read_to_string(&path).expect("read config");
+    assert!(content.contains("actions: false"));
+    assert!(content.contains("show_desktop: false"));
+    assert!(!content.contains("show_desktop: true"));
+    std::fs::remove_file(path).expect("remove config");
+}
+
+#[test]
+fn creates_missing_config_with_show_desktop_setting() {
+    let path = temporary_config_path();
+
+    set_show_desktop(&path, false).expect("persist desktop setting");
+
+    assert_eq!(std::fs::read_to_string(&path).expect("read config"), "show_desktop: false\n");
+    std::fs::remove_file(path).expect("remove config");
 }
 
 #[test]
