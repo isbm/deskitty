@@ -29,7 +29,7 @@ use compositor::{MenuOptions, MenuState, Mode, Notice};
 use crossterm::ExecutableCommand;
 use crossterm::event::{Event, KeyCode, KeyModifiers};
 use ratatui::backend::CrosstermBackend;
-use ratatui::layout::Rect;
+use ratatui::layout::{Rect, Size};
 use std::io;
 use std::time::{Duration, Instant};
 
@@ -52,6 +52,7 @@ fn run() -> Result<(), String> {
 
     let cfg_path = matches.get_one::<String>("config").map(|s| s.as_str());
     let invocation = std::env::args_os().next();
+    let config_path = config::active_config_path(cfg_path, invocation.as_deref());
     let cfg = config::load(cfg_path, invocation.as_deref()).map_err(|err| format!("{err:#}"))?;
 
     let mut stdout = io::stdout();
@@ -191,12 +192,8 @@ fn run() -> Result<(), String> {
                                     dirty = true;
                                 }
                                 compositor::MenuItem::ToggleDesktop { .. } => {
-                                    show_desktop = !show_desktop;
                                     let size = term.size().map_err(|e| e.to_string())?;
-                                    let (rows, cols) = grid_dimensions(size.width, size.height, show_desktop);
-                                    grid_rows = rows;
-                                    grid_cols = cols;
-                                    ws.resize_all(grid_rows, grid_cols).map_err(|e| e.to_string())?;
+                                    show_desktop = toggle_desktop(&mut ws, &config_path, size, show_desktop, &mut grid_rows, &mut grid_cols)?;
                                     mode = Mode::Normal;
                                     dirty = true;
                                 }
@@ -224,12 +221,8 @@ fn run() -> Result<(), String> {
                                             dirty = true;
                                         }
                                         compositor::MenuItem::ToggleDesktop { .. } => {
-                                            show_desktop = !show_desktop;
                                             let size = term.size().map_err(|e| e.to_string())?;
-                                            let (rows, cols) = grid_dimensions(size.width, size.height, show_desktop);
-                                            grid_rows = rows;
-                                            grid_cols = cols;
-                                            ws.resize_all(grid_rows, grid_cols).map_err(|e| e.to_string())?;
+                                            show_desktop = toggle_desktop(&mut ws, &config_path, size, show_desktop, &mut grid_rows, &mut grid_cols)?;
                                             mode = Mode::Normal;
                                             dirty = true;
                                         }
@@ -296,10 +289,18 @@ fn run() -> Result<(), String> {
     result
 }
 
+fn toggle_desktop(
+    ws: &mut workspace::Workspace, config_path: &std::path::Path, size: Size, show_desktop: bool, grid_rows: &mut u16, grid_cols: &mut u16,
+) -> Result<bool, String> {
+    let visible = !show_desktop;
+    let (rows, cols) = grid_dimensions(size.width, size.height, visible);
+    ws.resize_all(rows, cols).map_err(|error| error.to_string())?;
+    config::set_show_desktop(config_path, visible).map_err(|error| format!("{error:#}"))?;
+    *grid_rows = rows;
+    *grid_cols = cols;
+    Ok(visible)
+}
+
 fn grid_dimensions(width: u16, height: u16, show_desktop: bool) -> (u16, u16) {
-    if show_desktop {
-        (height.saturating_sub(3), width.saturating_sub(2))
-    } else {
-        (height, width)
-    }
+    if show_desktop { (height.saturating_sub(3), width.saturating_sub(2)) } else { (height, width) }
 }

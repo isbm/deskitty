@@ -54,11 +54,7 @@ fn read_loadavg() -> Option<(f32, f32, f32)> {
 }
 
 fn parse_kb_value(line: &str) -> u64 {
-    line.split_whitespace()
-        .nth(1)
-        .and_then(|v| v.parse::<u64>().ok())
-        .unwrap_or(0)
-        * 1024
+    line.split_whitespace().nth(1).and_then(|v| v.parse::<u64>().ok()).unwrap_or(0) * 1024
 }
 
 fn format_bytes(bytes: u64) -> String {

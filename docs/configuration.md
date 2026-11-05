@@ -125,8 +125,8 @@ In that mode the terminal grid uses the entire window, and the PTYs are
 resized to the full terminal dimensions. `Ctrl+\` is handled by deskitty
 itself, so the command menu still opens while the desktop is hidden.
 
-The setting only controls the starting state. It can be toggled at runtime
-from the command menu.
+The setting controls the starting state and is updated when it is toggled from
+the command menu.
 
 ## Command menu
 
@@ -151,7 +151,8 @@ The toggle always starts in the state configured by `actions`.
 full window. `Show desktop` restores them and resizes the terminal back to the
 inset grid.
 
-Both toggles take effect immediately without restarting.
+Both toggles take effect immediately and persist the updated `show_desktop`
+setting for the next start.
 
 ## Debug mode
 

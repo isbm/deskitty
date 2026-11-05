@@ -90,11 +90,7 @@ impl Terminal {
     }
 
     fn active_dec_special_graphics(&self) -> bool {
-        if self.using_g1_charset {
-            self.g1_dec_special_graphics
-        } else {
-            self.g0_dec_special_graphics
-        }
+        if self.using_g1_charset { self.g1_dec_special_graphics } else { self.g0_dec_special_graphics }
     }
 
     fn translate_dec_special_graphics(&mut self, bytes: &[u8]) -> Vec<u8> {
@@ -167,11 +163,7 @@ impl Terminal {
                 }
                 EscapeState::StringEscape => {
                     translated.push(byte);
-                    self.escape_state = if byte == b'\\' {
-                        EscapeState::Ground
-                    } else {
-                        EscapeState::String
-                    };
+                    self.escape_state = if byte == b'\\' { EscapeState::Ground } else { EscapeState::String };
                 }
             }
         }

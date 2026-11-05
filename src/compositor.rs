@@ -203,11 +203,7 @@ fn bottom_right_corner_color(area: Rect, stops: &[Color]) -> Color {
     let segments = stops.len() - 1;
     let scaled = pos * segments as f32;
     let base = scaled.floor() as usize;
-    if base >= segments {
-        stops[segments]
-    } else {
-        lerp_color(stops[base], stops[base + 1], scaled - base as f32)
-    }
+    if base >= segments { stops[segments] } else { lerp_color(stops[base], stops[base + 1], scaled - base as f32) }
 }
 
 /// Render the full frame: terminal grid, status bar, and optional command menu.
@@ -420,15 +416,23 @@ fn render_terminal_grid(f: &mut Frame, area: Rect, screen: &vt100::Screen) {
                     continue;
                 }
 
-                let mut style = Style::default()
-                    .fg(to_ratatui_color(cell.fgcolor()))
-                    .bg(to_ratatui_color(cell.bgcolor()));
+                let mut style = Style::default().fg(to_ratatui_color(cell.fgcolor())).bg(to_ratatui_color(cell.bgcolor()));
 
-                if cell.bold()      { style = style.add_modifier(Modifier::BOLD); }
-                if cell.dim()       { style = style.add_modifier(Modifier::DIM); }
-                if cell.italic()    { style = style.add_modifier(Modifier::ITALIC); }
-                if cell.underline() { style = style.add_modifier(Modifier::UNDERLINED); }
-                if cell.inverse()   { style = style.add_modifier(Modifier::REVERSED); }
+                if cell.bold() {
+                    style = style.add_modifier(Modifier::BOLD);
+                }
+                if cell.dim() {
+                    style = style.add_modifier(Modifier::DIM);
+                }
+                if cell.italic() {
+                    style = style.add_modifier(Modifier::ITALIC);
+                }
+                if cell.underline() {
+                    style = style.add_modifier(Modifier::UNDERLINED);
+                }
+                if cell.inverse() {
+                    style = style.add_modifier(Modifier::REVERSED);
+                }
 
                 let ch = cell.contents();
                 let display = if ch.is_empty() { " " } else { ch };
@@ -461,7 +465,10 @@ fn render_terminal_grid(f: &mut Frame, area: Rect, screen: &vt100::Screen) {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn render_status_bar(f: &mut Frame, area: Rect, _labels: &[(char, String)], _active_idx: usize, mode: &Mode, sysinfo: Option<&SysInfo>, corner_color: Color, bg_active: bool) {
+fn render_status_bar(
+    f: &mut Frame, area: Rect, _labels: &[(char, String)], _active_idx: usize, mode: &Mode, sysinfo: Option<&SysInfo>, corner_color: Color,
+    bg_active: bool,
+) {
     let mut spans = vec![Span::styled("──", Style::default())];
 
     let load_bg = crate::palette::PROCESSING_BASE;
@@ -558,7 +565,12 @@ fn render_menu(f: &mut Frame, area: Rect, menu: &MenuState) {
 
     let header_rect = Rect::new(inner_area.x, inner_area.y, inner_area.width, 1);
     f.render_widget(
-        &DashedTitle { text: "Applications", text_fg: crate::palette::PRIMARY, grad_start: crate::palette::PROCESSING, grad_end: crate::palette::PROCESSING_DIMMED },
+        &DashedTitle {
+            text: "Applications",
+            text_fg: crate::palette::PRIMARY,
+            grad_start: crate::palette::PROCESSING,
+            grad_end: crate::palette::PROCESSING_DIMMED,
+        },
         header_rect,
     );
 

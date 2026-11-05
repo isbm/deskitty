@@ -2,6 +2,7 @@ use anyhow::Context;
 use serde::Deserialize;
 use std::ffi::OsStr;
 use std::path::{Component, Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::events::EventsConfig;
 
@@ -84,13 +85,69 @@ pub(crate) fn expand_tilde(path: &Path, home: &Path) -> PathBuf {
 /// use `~/.config/deskitty/<name>.conf`. Missing automatic configs start a
 /// single `bash` tab. Explicit paths and malformed configs report errors.
 pub fn load(path: Option<&str>, invocation: Option<&OsStr>) -> anyhow::Result<Config> {
-    let home = std::env::var_os("HOME").unwrap_or_default();
-    let config_path = selected_config_path(path, invocation, Path::new(&home));
+    let config_path = active_config_path(path, invocation);
     if path.is_some() || config_path.is_file() {
         return load_with_default_tab(&config_path);
     }
 
     Ok(default_config())
+}
+
+/// Updates the desktop frame visibility in the selected configuration file.
+///
+/// Creates the configuration with the default settings when it does not yet
+/// exist. The replacement is written to a sibling temporary file before it is
+/// atomically renamed into place.
+pub fn set_show_desktop(path: &Path, visible: bool) -> anyhow::Result<()> {
+    let content = match std::fs::read_to_string(path) {
+        Ok(content) => content,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(error) => return Err(error).with_context(|| format!("reading {}", path.display())),
+    };
+    let updated = update_show_desktop(&content, visible);
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    std::fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
+
+    let temporary = temporary_path(path);
+    std::fs::write(&temporary, updated).with_context(|| format!("writing {}", temporary.display()))?;
+    std::fs::rename(&temporary, path).with_context(|| format!("replacing {}", path.display()))
+}
+
+fn update_show_desktop(content: &str, visible: bool) -> String {
+    let replacement = format!("show_desktop: {visible}");
+    let mut replaced = false;
+    let updated = content
+        .lines()
+        .map(|line| {
+            if !replaced && line.trim_start().starts_with("show_desktop:") {
+                replaced = true;
+                replacement.clone()
+            } else {
+                line.to_string()
+            }
+        })
+        .collect::<Vec<_>>();
+
+    if replaced {
+        return format!("{}\n", updated.join("\n"));
+    }
+
+    let separator = if content.trim().is_empty() { "" } else { "\n" };
+    format!("{}{separator}{replacement}\n", content.trim_end())
+}
+
+fn temporary_path(path: &Path) -> PathBuf {
+    static NEXT_TEMPORARY_FILE: AtomicUsize = AtomicUsize::new(0);
+
+    let suffix = NEXT_TEMPORARY_FILE.fetch_add(1, Ordering::Relaxed);
+    let filename = path.file_name().unwrap_or_else(|| OsStr::new("config"));
+    path.with_file_name(format!(".{}.{}.tmp", filename.to_string_lossy(), suffix))
+}
+
+/// Returns the config file selected by this invocation.
+pub fn active_config_path(path: Option<&str>, invocation: Option<&OsStr>) -> PathBuf {
+    let home = std::env::var_os("HOME").unwrap_or_default();
+    selected_config_path(path, invocation, Path::new(&home))
 }
 
 /// Choose a config using the original invocation, without resolving symlinks.
